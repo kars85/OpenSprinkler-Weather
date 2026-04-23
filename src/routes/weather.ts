@@ -484,7 +484,7 @@ function sendWateringError(
     sendWateringData(res, {
         errCode: error.errCode,
         scale: resetScale ? 100 : undefined,
-    });
+    }, useJson);
 }
 
 /**
