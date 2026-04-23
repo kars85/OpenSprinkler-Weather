@@ -10,6 +10,12 @@ var queue: Array<Observation> = [],
 	lastRainEpoch = 0,
 	lastRainCount: number;
 
+export function resetLocalWeatherStateForTests(): void {
+	queue = [];
+	lastRainEpoch = 0;
+	lastRainCount = undefined;
+}
+
 function getMeasurement(req: express.Request, key: string): number {
 	let value: number;
 
@@ -18,17 +24,27 @@ function getMeasurement(req: express.Request, key: string): number {
 
 export const captureWUStream = async function( req: express.Request, res: express.Response ) {
 	let rainCount = getMeasurement(req, "dailyrainin");
+	const rainin = getMeasurement(req, "rainin");
+
+	let precip = 0;
+	if ( !isNaN( rainCount ) ) {
+		// "dailyrainin" is a daily accumulator that resets at midnight. Handle the first
+		// observation and potential counter resets to avoid generating NaN precipitation.
+		if ( typeof lastRainCount === "number" ) {
+			precip = rainCount < lastRainCount ? rainCount : rainCount - lastRainCount;
+		}
+	}
 
 	const obs: Observation = {
 		timestamp: req.query.dateutc === "now" ? Math.floor(Date.now()/1000) : Math.floor(new Date(String(req.query.dateutc) + "Z").getTime()/1000),
 		temp: getMeasurement(req, "tempf"),
 		humidity: getMeasurement(req, "humidity"),
 		windSpeed: getMeasurement(req, "windspeedmph"),
-		solarRadiation: getMeasurement(req, "solarradiation") * 24 / 1000,	// Convert to kWh/m^2 per day
-		precip: rainCount < lastRainCount ? rainCount : rainCount - lastRainCount,
+		solarRadiation: getMeasurement(req, "solarradiation"),
+		precip,
 	};
 
-	lastRainEpoch = getMeasurement(req, "rainin") > 0 ? obs.timestamp : lastRainEpoch;
+	lastRainEpoch = !isNaN( rainin ) && rainin > 0 ? obs.timestamp : lastRainEpoch;
 	lastRainCount = isNaN(rainCount) ? lastRainCount : rainCount;
 
 	queue.unshift(obs);
@@ -89,7 +105,8 @@ export default class LocalWeatherProvider extends WeatherProvider {
 			maxTemp: queue.reduce( (max, obs) => ( max < obs.temp ) ? obs.temp : max, -Infinity ),
 			minHumidity: queue.reduce( (min, obs) => ( min > obs.humidity ) ? obs.humidity : min, Infinity ),
 			maxHumidity: queue.reduce( (max, obs) => ( max < obs.humidity ) ? obs.humidity : max, -Infinity ),
-			solarRadiation: queue.reduce( (sum, obs) => !isNaN( obs.solarRadiation ) && ++cSolar ? sum + obs.solarRadiation : sum, 0) / cSolar,
+			// Convert average instantaneous W/m^2 readings to daily kWh/m^2.
+			solarRadiation: (queue.reduce( (sum, obs) => !isNaN( obs.solarRadiation ) && ++cSolar ? sum + obs.solarRadiation : sum, 0) / cSolar) * 24 / 1000,
 			windSpeed: queue.reduce( (sum, obs) => !isNaN( obs.windSpeed ) && ++cWind ? sum + obs.windSpeed : sum, 0) / cWind
 		};
 
