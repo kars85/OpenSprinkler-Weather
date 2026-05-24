@@ -2,7 +2,9 @@
 &nbsp;[![Build Status](https://api.travis-ci.org/OpenSprinkler/OpenSprinkler-Weather.svg?branch=master)](https://travis-ci.org/) [![devDependency Status](https://david-dm.org/OpenSprinkler/OpenSprinkler-Weather/status.svg)](https://david-dm.org/OpenSprinkler/OpenSprinkler-Weather#info=dependencies)<br>
 &nbsp;[Official Site][official] | [Support][help] | [Changelog][changelog]
 <br>
-This script works with the OpenSprinkler Unified Firmware to automatically adjust station run times based on weather data. In addition to calculating the watering level, it also supplies details such as the user’s time zone, sunrise, and sunset times, based on the user's location information. The script is implemented in JavaScript and runs on Node.js.
+This script is used by OpenSprinkler Unified Firmware to update the water level of the device. It also provides timezone information based on user location along with other local information (sunrise, sunset, daylights saving time, etc).
+
+The production version runs on Amazon Elastic Beanstalk (AWS EB) and therefore this package is tailored to be zipped and uploaded to AWS EB. The script is written in Javascript for Node.JS.
 
 ---
 
@@ -14,110 +16,68 @@ This script works with the OpenSprinkler Unified Firmware to automatically adjus
 
 **server.js** is the primary file launching the API daemon.
 
-**src/routes/** contains all the endpoints for the API service, including weather data providers, adjustment methods, geocoders. The list of currently supported weather data providers, their capabilities, and details on various adjustment methods can be found at our [support website]: https://openthings.freshdesk.com/support/solutions/articles/5000823370-use-weather-adjustments
+**routes/*.js** contains all the endpoints for the API service. Currently, only two exists for weather adjustment and logging a PWS observation.
 
 ---
+## Installating a Local Weather Service
 
-## Running the Weather Script Locally
+If you would like to choose between different Weather Providers (currently OpenWeatherMap, DarkSky and Apple WeatherKit are supported) or use your local PWS to provide the weather information used by OpenSprinkler then you can install and configure the Weather Service on a device within your own local network.
 
-To run the weather script on your own computer, start by downloading the source code (either via `git clone` or a ZIP download). Then install dependencies and compile the TypeScript sources:
+You will need a 24x7 "always on" machine to host the service (this can be a Windows or Linux machine or even a Raspberry Pi device) provided it supports the `Node.js` environment.
 
-```
-npm install
-npm run build
-```
-
-### 1. Compose `.env` file
-Before starting the service, you’ll need a `.env` file with configuration parameters such as the server port, default weather provider, geocoder, and any required API keys. A minimal example looks like this:
-
-```
-HOST=0.0.0.0
-PORT=3000
-GEOCODER=GoogleMaps
-GOOGLE_MAPS_API_KEY=your_api_key
-```
-
-Note: The `GOOGLE_MAPS_API_KEY` does not need to be valid if you query the service directly with GPS coordinates. The Maps API is only used for geocoding (converting a city name or ZIP code into latitude/longitude).
-
-To set a default weather provider (e.g. `OpenMeteo`), include:
-
-```
-WEATHER_PROVIDER=OpenMeteo
-```
-
-If your chosen provider requires an API key (for example, OpenWeatherMap or `OWM`), add:
-
-```
-WEATHER_PROVIDER=OWM
-OWM_API_KEY=your_owm_api_key
-```
-
-Unlike earlier versions, this script also allows you to specify the weather provider and API key dynamically via the `wto` parameter in API queries. This means you don’t have to hardcode a default provider in `.env` unless you prefer to.
-
-### 2. Build the baselineETo data:
-
-```
-cd baselineEToData
-sh prepareData.sh 20
-sh baseline.sh
-```
-
-This command runs the data preparation script with `20` interpolation passes (the recommended default, explained in the `README` for that folder). When it finishes, it will produce the file `Baseline_ETo_Data.bin`, which is required by the weather service for ETo-based watering adjustments. This file only needs to be built once -- you don't need to generate it again if you already have it.
-
-### 3. Start the Service
-Once your `.env` file is ready and the baseline ETo data is prepared, start the service with:
-
-```
-npm run start
-```
-
-The server will launch on the port you configured in `.env`.
+For detailed instructions on setup and configuration of a local Weather Service running on a Raspberry Pi then click [here](docs/local-installation.md)
 
 ---
+## Connecting a Personal Weather Station to a Local Weather Service
 
-## Running the Weather Service with Docker
+If you are running a local instance of the Weather Service then you may be able to send the data directly from your PWS to the Weather Service avoiding any "cloud" based services. The weather data can then be used by the Weather Service to calculate Zimmerman based watering levels.
 
-You can also run the precompiled weather service in Docker. The GitHub repository automatically publishes an up-to-date image, which you can pull with:
+### Options for PWS Owners
 
-`ghcr.io/opensprinkler/weather-server:release`
+**1 ) PWS supporting RESTfull output**
 
-To launch it as a background service (daemon), run the container and point it to your `.env` file for configuration. The .env setup is the same as described above, but note that the Docker image already includes the `Baseline_ETo_Data.bin`, so you don’t need to generate it yourself.
+Some PWS allow the user to specify a `GET request` to send weather observations onto a local service for processing. For example, the MeteoBridge Pro allows for requests to be specified in a custom template that translates the PWS weather values and units into a format that the local Weather Service can accept. If available, the user documentation for the PWS should detail how to configure a custom GET request.
 
-If you prefer to build the Docker image locally, be aware that the process is resource-intensive. You will need at least 30 GB of free disk space and sufficient memory to complete the build, since generating the baseline ETo dataset is computationally heavy.
+For more information on the RESTfull protocol click [here](docs/pws-protocol.md)
 
----
+**2 ) Networked PWS that support Weather Underground**
 
-## Using the Weather Service
+Many PWS already support the Weather Underground format and can be connected to the user's home network to send data directly to the WU cloud service. For these PWS, it is possible to physically intercept the data stream heading to the WU cloud and redirect it to the Weather Service server instead.
 
-When the weather server is running, it starts a web service at `<host>:3000`, where `<host>` is the IP/DNS of your computer and `3000` is the default port. The OpenSprinkler firmware and UI/app communicate with it through these endpoints:
+To do this intercepting, you place a physical device - such as a Raspberry Pi - in-between the PWS and the home network. It is this "man-in-the-middle" device that will look for information heading from the PWS toward the WU cloud and redirect that information to the local Weather Service.
 
-- `<host>:3000`: Returns the weather service version.
+For more information on configuring a Raspberry Pi Zero W to act as a "Man In The Middle" solution follow these links:
+- If you have a PWS that connects to your home network using an ethernet cable then click [here](docs/man-in-middle.md)
+- If you have a PWS that connects to your home network via wifi then click [here](docs/wifi-hotspot.md)
 
-- `<host>:3000/0?loc=[long],[lat]`: Used for **Manual** adjustment.
-  - `[long],[lat]` are GPS coordinates (e.g. `42,-75`).
-  - Returns time zone, sunrise/sunset times, and an error code if any.
-  - Time zone is encoded as `(GMT shift × 4) + 48`. For example, `GMT-4` is encoded as `32`.
-  - Sunrise/sunset are given in minutes since midnight.
-  - If a valid geocoder (e.g. Google Maps with API key) is set, location may also be provided as ZIP code, city, etc.
+**3 ) PWS Supported By WeeWX**
 
-- `<host>:3000/1?loc=[long],[lat]&wto="h":100,"t":100,"r":100,"bh":30,"bt":70,"br":0`: Used for **Zimmerman** adjustment method.
-  - `wto` specifies the optional adjustment parameters, such as weights and baselines of humidity, temperature, and rain.
-  - Returns all parameters from `/0`, plus:
-    - `scale`: watering level calculated by the Zimmerman algorithm from yesterday's data.
-    - `rawData`: the raw weather data used for Zimmerman calculation
-    - `scales`: multi-day averages based on available historic data. The length of this array depends on the selected weather data provider's capability.
+The WeeWX project provides a mechanism for OpenSprinkler owners to capture the data from many different manufacturer's PWS and to both store the information locally and to publish the data to a number of destinations. OpenSprinkler owners can use this solution to send their PWS weather observations onto a local Weather Service server.
 
-- `<host>:3000/2?loc=[long],[lat]&wto="d":28`: Used for **Auto Rain Delay**, where `d` is the number of hours to delay if rain is currently reported.
+For more information on the "WeeWX Solution" click [here](docs/weewx.md)
 
-- `<host>:3000/3?loc=[long],[lat]&wto="baseETo":0.34,"elevation":600`: Used for **ETo** adjustment. `baseETo` is the baseline ETo value in inches/day; `elevation` is the elevation in feet. Returns `scale`, `rawData` and `scales` array similar to Zimmerman.
+**4 ) Solutions for specific PWS (provided by OpenSprinkler Forum members)**
 
-- **Weather Constraints** can be added via `wto` to any adjustment method above. For example:
-  - `"minTemp":78` triggers a return parameter of `restrict=1` if the current temperature is below `78°F`.
-  - `"rainAmt":1.5,"rainDays":4` triggers `restrict=1` if the forecast rain is more than 1.5 (inches) in the next 4 days.
-  - `"cali":` enables California restriction (stop watering if ≥0.1″ rain in past 48h).
+- Davis Vantage: a solution for this PWS has been kindly provided by @rmloeb [here](docs/davis-vantage.md)
+- Netatmo: instructions for configuring this PWS have been greatfully provided by @franzstein [here](docs/netatmo.md)
 
-- **Weather Data Provider** can be specified with any adjustment method by adding `"provider":"X","key":Y` to `wto`. For example:
-  - `"provider":"OpenMeteo"` for OpenMeteo (no key required)
-  - `"provider":"AW","key":"xxxx"` for AccuWeather with the corresponding key.
+## Docker
 
-- `<host>:3000/weatherData?loc=[long],[lat]`: Return forecast data. A provider can also be set via `wto`.
+It is possible to build a self-contained docker image from this repository.  It can then be used to run the service
+without installing any prerequisites or setting up systemd.
+
+### Building the Docker image
+```shell script
+./build-docker.sh  # run with -h for other options
+```
+The above will generate baselineEtoData (if not already done) and then build a complete opensprinkler-weather docker image.
+
+### Running the Docker image
+```shell script
+docker create --name=osweather -p 3000:3000 --restart unless-stopped opensprinkler-weather
+docker start osweather
+
+# Instead of the above, use this for testing/troubleshooting by running it in the foreground:
+docker run --rm -it -p 3000:3000 opensprinkler-weather
+```
+Note: to expose a different port, change `-p 3000:3000` to, eg `-p12345:3000`
