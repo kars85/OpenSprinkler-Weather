@@ -1,14 +1,35 @@
-FROM node
+FROM node:24-bookworm-slim AS build
+
+WORKDIR /weather
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run compile
+
+
+FROM node:24-bookworm-slim AS runtime
+
+ENV NODE_ENV=production
+
+WORKDIR /weather
+
+COPY package*.json ./
+RUN npm ci --omit=dev \
+    && npm cache clean --force
+
+COPY --from=build /weather/js ./js
+COPY --from=build /weather/baselineEToData ./baselineEToData
+COPY --from=build /weather/docs ./docs
+COPY --from=build /weather/README.md ./README.md
+
+RUN mkdir -p /weather/baselineEToData \
+    && touch /weather/geocoderCache.json /weather/observations.json \
+    && chown -R node:node /weather
+
+USER node
 
 EXPOSE 3000
 
-RUN groupadd osweather && useradd --no-log-init -m -g osweather osweather
-USER osweather
-
-ADD --chown=osweather:osweather . weather
-
-WORKDIR weather
-RUN npm install
-RUN npm run compile
-CMD npm start
-
+CMD ["npm", "start"]
