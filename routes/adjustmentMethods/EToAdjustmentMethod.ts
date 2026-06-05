@@ -289,9 +289,13 @@ async function calculateEToWateringScale(
     let elevation = 600; // Default elevation
 
     if ( adjustmentOptions && "baseETo" in adjustmentOptions ) {
-        baseETo = adjustmentOptions.baseETo
+        baseETo = adjustmentOptions.baseETo;
     } else {
         throw new CodedError( ErrorCode.MissingAdjustmentOption );
+    }
+
+    if ( !Number.isFinite( baseETo ) || baseETo <= 0 ) {
+        throw new CodedError( ErrorCode.MissingAdjustmentOption, "baseETo must be a finite number greater than 0." );
     }
 
     if ( adjustmentOptions && "elevation" in adjustmentOptions ) {
