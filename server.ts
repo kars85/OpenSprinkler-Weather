@@ -3,6 +3,8 @@ dotenv_config();
 
 import * as express from "express";
 import * as cors from "cors";
+import { default as helmet } from "helmet";
+import { rateLimit } from "express-rate-limit";
 
 import * as weather from "./routes/weather";
 import * as local from "./routes/weatherProviders/local";
@@ -14,6 +16,32 @@ let	host	= process.env.HOST || "127.0.0.1",
 
 export let pws = process.env.PWS || "none";
 export const app = express();
+
+const DEFAULT_RATE_LIMIT_MAX = 600;
+
+function getRateLimitMax() {
+	const rateLimitMax = process.env.RATE_LIMIT_MAX;
+
+	if ( rateLimitMax && /^\d+$/.test( rateLimitMax ) ) {
+		const parsedRateLimitMax = parseInt( rateLimitMax, 10 );
+
+		if ( parsedRateLimitMax > 0 ) {
+			return parsedRateLimitMax;
+		}
+	}
+
+	return DEFAULT_RATE_LIMIT_MAX;
+}
+
+app.use( helmet() );
+app.use( rateLimit( {
+	windowMs: 15 * 60 * 1000,
+	max: getRateLimitMax(),
+	standardHeaders: true,
+	legacyHeaders: false
+} ) );
+app.use( express.json( { limit: "10kb" } ) );
+app.use( express.urlencoded( { extended: false, limit: "10kb" } ) );
 
 // Handle requests matching /weatherID.py where ID corresponds to the
 // weather adjustment method selector.
