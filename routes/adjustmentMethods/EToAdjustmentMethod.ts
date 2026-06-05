@@ -419,6 +419,28 @@ async function calculateEToWateringScale(
  * Enhanced calculation functions with crop coefficient support
  */
 
+function hargreavesEto(maxTempF: number, minTempF: number, coordinates: GeoCoordinates, periodStartTime: number): number {
+    const maxTempC = (maxTempF - 32) * 5 / 9;
+    const minTempC = (minTempF - 32) * 5 / 9;
+    const avgTempC = (maxTempC + minTempC) / 2;
+    const dayOfYear = moment.unix(periodStartTime).dayOfYear();
+
+    const inverseRelativeEarthSunDistance = 1 + 0.033 * Math.cos(2 * Math.PI / 365 * dayOfYear);
+    const solarDeclination = 0.409 * Math.sin(2 * Math.PI / 365 * dayOfYear - 1.39);
+    const latitudeRads = Math.PI / 180 * coordinates[0];
+    const sunsetHourAngleArgument = -Math.tan(latitudeRads) * Math.tan(solarDeclination);
+    const sunsetHourAngle = Math.acos(Math.max(-1, Math.min(1, sunsetHourAngleArgument)));
+    const extraterrestrialRadiationMj = 24 * 60 / Math.PI * 0.0820 * inverseRelativeEarthSunDistance *
+        (sunsetHourAngle * Math.sin(latitudeRads) * Math.sin(solarDeclination) +
+        Math.cos(latitudeRads) * Math.cos(solarDeclination) * Math.sin(sunsetHourAngle));
+    const extraterrestrialRadiationMm = 0.408 * extraterrestrialRadiationMj;
+
+    const tempRangeC = Math.max(0, maxTempC - minTempC);
+    const etoMm = 0.0023 * (avgTempC + 17.8) * Math.sqrt(tempRangeC) * extraterrestrialRadiationMm;
+
+    return Math.max(0, etoMm / 25.4);
+}
+
 function calculateFullForecastScaleWithCrop(
     historicalEto: number,
     historicalData: EToData,
@@ -515,8 +537,8 @@ function calculateHybridForecastScaleWithCrop(
     for (const dayData of forecastData) {
         let dailyEto: number;
         if (dayData.estimatedFields.length > 2) {
-            const avgTemp = (dayData.maxTemp + dayData.minTemp) / 2;
-            dailyEto = Math.max(0, (avgTemp - 32) * 0.004);
+            // Hargreaves temperature-only fallback used when too many fields are estimated.
+            dailyEto = hargreavesEto(dayData.maxTemp, dayData.minTemp, coordinates, dayData.periodStartTime);
         } else {
             dailyEto = calculateETo(dayData, elevation, coordinates);
         }
