@@ -26,6 +26,10 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 			locationData = await httpJSONRequest( locationUrl );
 		} catch ( err ) {
 			console.error( "Error retrieving location information from AccuWeather:", err );
+			throw new CodedError( ErrorCode.LocationServiceApiError );
+		}
+		if ( !locationData || !locationData.Key ) {
+			throw new CodedError( ErrorCode.NoLocationFound );
 		}
 		//console.log("Location key:" + locationData.Key);
 
@@ -142,6 +146,10 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 			locationData = await httpJSONRequest( locationUrl );
 		} catch ( err ) {
 			console.error( "Error retrieving location information from AccuWeather:", err );
+			throw new CodedError( ErrorCode.LocationServiceApiError );
+		}
+		if ( !locationData || !locationData.Key ) {
+			throw new CodedError( ErrorCode.NoLocationFound );
 		}
 
 		// The Unix epoch seconds timestamp of 24 hours ago.
