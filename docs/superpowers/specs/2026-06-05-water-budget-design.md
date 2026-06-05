@@ -39,22 +39,26 @@ Four independently testable units:
 ## The Model (open-loop, rain-discounted ET accumulator)
 
 ### Persisted state (per location)
-- `deficit` — inches of accumulated, rain-discounted water demand (≥ 0)
+- `rainBank` — inches of stored effective rain not yet consumed by ET (≥ 0). This is the single piece of memory.
 - `lastUpdated` — `YYYY-MM-DD` of the last computation (idempotency + gap detection)
 - `lastScale` — last returned scale (used for stale-data fallback)
 - `history` — capped ring buffer of `DecisionRecord` (≈ last 90 days)
 
-### Daily update
+### Daily update (rain-bank model)
 ```
-ETc           = calculateETo(weather) * Kc                       // demand, inches
-effectiveRain = measuredOrForecastPrecip * runoffFactor          // inches; excess discarded by the floor
-deficit       = clamp(deficit + ETc - effectiveRain, 0, deficitCap)
-scale         = clamp(100 * deficit / referenceETc, 0, maxScale)
+ETc           = calculateETo(weather) * Kc                       // today's demand, inches
+referenceETc  = baselineDailyETo(location) * Kc                  // a normal day's demand, inches
+effectiveRain = measuredOrForecastPrecip * runoffFactor          // inches
+available     = rainBank + effectiveRain                          // water on hand from past+today rain
+metByRain     = min(ETc, available)                              // rain covers this much of today's demand
+unmetDemand   = ETc - metByRain                                   // what irrigation must cover today
+rainBank      = min(available - metByRain, rainBankCap)           // surplus rain carried forward (capped)
+scale         = clamp(round(100 * unmetDemand / referenceETc), 0, maxScale)
 ```
 
-- **No `waterApplied` term (open-loop).** In sustained dry weather `deficit` rises and pins at `deficitCap`, so `scale` rests at its steady state (≈ 100% = a normal program day) — correct, because in a dry spell you water normally on every scheduled day. A rain event subtracts from `deficit`, holding `scale` below 100% for as many days as it takes ET to rebuild it (**multi-day rain memory**). A heat wave drives `ETc > referenceETc`, ramping `scale` toward `maxScale`.
-- **Normalize to local seasonal normal:** `referenceETc = baselineETo(location, dayOfYear) * Kc`, using the shipped `baselineETo` data, so "100%" means *normal for this place and season*.
-- **Cap:** `deficitCap = (maxScale / 100) * referenceETc` (e.g. 2× ref → a 200% ceiling).
+- **No `waterApplied` term (open-loop).** Irrigation implicitly covers `unmetDemand` each day; only *rain* is banked and carried. On a normal dry day `rainBank = 0`, so `unmetDemand = ETc` and `scale = 100 * ETc / referenceETc` ≈ **100%** — the correct steady state. A rain event fills the bank and covers demand for the following days, holding `scale` near 0 until the bank drains (**multi-day rain memory**). A heat wave drives `ETc > referenceETc`, ramping `scale` toward `maxScale`. *(This corrects an earlier draft whose `deficit`-accumulator pinned dry weather at 200% instead of 100%.)*
+- **Normalize to local annual-average normal:** `referenceETc = baselineDailyETo(location) * Kc`. The shipped `baselineETo` binary stores **one annual-average daily ETo per location** (it is not day-of-year specific), so "100%" means *a normal day for this location*; summer naturally exceeds 100%, winter falls below. Reuses the existing `baselineETo` data file.
+- **Memory cap:** `rainBankCap = rainBankCapDays * referenceETc` (default `rainBankCapDays = 14`) so a freak storm can't suppress watering for months.
 
 ### Parameters
 
@@ -62,12 +66,13 @@ scale         = clamp(100 * deficit / referenceETc, 0, maxScale)
 |---|---|---|
 | `Kc` | 0.9 (static, configurable) | crop water-use factor; v1 uses a single static value. Reusing ETo's dynamic per-season `TurfgrassManager` Kc is a deliberate future enhancement, not v1. |
 | `maxScale` | 200% | upper clamp (matches Zimmerman) |
-| `runoffFactor` | 1.0 | fraction of rain counted effective (excess discarded by the deficit floor) |
-| `gapResetDays` | 2 | gap length that triggers a neutral reset |
+| `runoffFactor` | 1.0 | fraction of rain counted effective |
+| `rainBankCapDays` | 14 | max days of rain memory (`rainBankCap = rainBankCapDays * referenceETc`) |
+| `gapResetDays` | 2 | gap length that triggers a memory reset |
 
 ### Edge behaviors
-- **Cold start** (no prior state): `deficit = referenceETc` → first run is a neutral 100%, then memory builds.
-- **Service-down gap** longer than `gapResetDays`: missed-day weather is unknown, so reset `deficit = referenceETc` (neutral) and note it in the `reason`, rather than fabricate history.
+- **Cold start** (no prior state): `rainBank = 0` → first run computes from today's weather (≈ 100% on a normal day); memory builds from there.
+- **Service-down gap** longer than `gapResetDays`: missed-day weather is unknown, so reset `rainBank = 0` (conservative — assume no stored rain) and note it in the `reason`, rather than fabricate history.
 - **Same-day re-poll** (`lastUpdated == today`): return the stored result; do not re-accumulate (idempotent).
 - **Missing weather fields:** see Error Handling — do not corrupt the balance.
 
@@ -87,7 +92,7 @@ interface StateStore {
 ### `BudgetState`
 ```
 {
-  deficit: number,            // inches
+  rainBank: number,           // inches of stored effective rain
   lastUpdated: "YYYY-MM-DD",
   lastScale: number,
   history: DecisionRecord[]   // capped ring buffer (~90)
@@ -98,10 +103,10 @@ interface StateStore {
 
 Each computation appends one `DecisionRecord` (the entire "insight" payload for now — no UI):
 ```
-{ date, scale, eto, etc, effectiveRain, deficitBefore, deficitAfter,
+{ date, scale, eto, etc, effectiveRain, unmetDemand, rainBankBefore, rainBankAfter,
   referenceEtc, resolvedLocation, reason }
-// eto = reference ETo (from calculateETo); etc = eto * Kc (demand);
-// referenceEtc = baselineETo * Kc (the 100%-normalizer)
+// eto = reference ETo (from calculateETo); etc = eto * Kc (today's demand);
+// referenceEtc = baselineDailyETo * Kc (the 100%-normalizer)
 ```
 A future dashboard (separate cycle) reads this array; deferring the UI costs nothing because the data is captured from day one.
 
@@ -122,7 +127,7 @@ Coordinates are derived from the `loc` request parameter upstream in `resolveCoo
 | `WUnderground` (default) | `autocomplete.wunderground.com` | city / ZIP / place names | no |
 | `GoogleMaps` | Maps Geocoding API (`address=…`) | **full street addresses** | yes (`GOOGLE_MAPS_API_KEY`) |
 
-Documentation will state that `loc` accepts ZIP / place / GPS / **street address**, and recommend `GEOCODER=GoogleMaps` for street-address precision. The resolved place name is echoed in the `reason` / decision log so an address user can confirm correct geocoding. Adding a new geocoder or changing the default is **out of scope**.
+Documentation will state that `loc` accepts ZIP / place / GPS / **street address**, and recommend `GEOCODER=GoogleMaps` for street-address precision. The model carries a `resolvedLocation` field so a place name *can* be echoed in the `reason` / decision log, but v1 geocoders return coordinates only — so a friendly place name in the reason is a future enhancement (it stays `undefined` in v1). Adding a new geocoder or changing the default is **out of scope**.
 
 ## Configuration
 
