@@ -22,7 +22,7 @@ This feature adds three opt-in **skip guards** that force `scale = 0` when their
 | Placement | A **pure `evaluateSkips()`** function + a **guard step in `getWateringData`**, not a wrapper method and not per-method duplication. |
 | Data source | One `getWeatherData()` call in the guard layer (returns `minTemp`/`temp`/`wind`/`precip`), applied uniformly across all methods. |
 | Defaults | **All opt-in (default OFF).** Zero behavior change until a user enables a skip. |
-| Caching | The watering-scale cache stores only the **method** result (unchanged). The skip guard runs **live on every request** (cache hit *and* miss); its weather fetch is **short-TTL memoized** separately. Skips are live guards, not daily decisions. |
+| Caching | The watering-scale cache **and the existing California restriction behavior are unchanged** (the cache still holds the method+restriction result). Weather skips are a **live per-request overlay** applied *after* cache-hit/miss resolution, with a separate **short-TTL memoized** weather fetch — live guards, not daily decisions. Restructuring the restriction to be live is a separate follow-up (out of scope). |
 | Failure mode | **Fail-open**, per rule. Never block watering on absent/uncertain data. |
 | Skip effect | Hard `scale = 0` (v1). Not a reduction. |
 
@@ -70,10 +70,11 @@ evaluateSkips(
 
 ## Caching & Live Evaluation
 
-- `WateringScaleCache` is **unchanged**: it caches the adjustment-method result (pre-skip) until end-of-day.
-- The skip guard runs **after cache resolution on every request**, so it is genuinely live: a morning no-skip does not suppress an evening freeze, and a morning skip does not pin `scale = 0` after conditions clear.
-- To bound provider load under frequent polling, the skip's `getWeatherData` result is memoized with a short TTL (`SKIP_WEATHER_TTL`, default 600000 ms / 10 min).
-- The guard **builds a fresh response object** (`{ ...dataToSend, scale: 0, rawData: { ...rawData, skip: 1, skipReason } }`) and never mutates a cached object by reference.
+- **Existing method-cache and restriction behavior are unchanged.** `WateringScaleCache` continues to store the adjustment-method result *including the current California restriction* (the restriction still runs on the original cache miss only, using its current data source). This feature does **not** refactor the cache or the restriction.
+- Weather skips are applied as a **live, per-request overlay AFTER cache-hit/miss resolution**, so they are genuinely live regardless of the cache: a morning no-skip does not suppress an evening freeze, and a morning skip does not pin `scale = 0` after conditions clear.
+- The skip overlay **always builds a fresh response object** (`{ ...dataToSend, scale: 0, rawData: { ...rawData, skip: 1, skipReason } }`) and **never mutates the cached object** by reference.
+- If the resolved (possibly cached) result is already `scale = 0` (e.g. the restriction fired on the original miss), skip evaluation may still run, but it **only adds `skip`/`skipReason` when a skip actually triggers** — it never invents metadata on top of a pre-existing 0.
+- To bound provider load under frequent polling, the skip's `getWeatherData` fetch is memoized with a short TTL (`SKIP_WEATHER_TTL`, default 600000 ms / 10 min).
 
 ## Skip-Weather Memo
 
@@ -103,11 +104,15 @@ Environment defaults, overridable per request via `wto`. Skips are stateless, so
 
 `wto` keys are deliberately specific (`skipFreeze`, `skipFreezeTemp`, ...) to avoid collision with existing watering/provider options (which already use generic keys). `resolveSkipConfig(adjustmentOptions)` returns a config containing only the enabled rules.
 
+**Strict boolean parsing.** Enable flags (`SKIP_FREEZE`/`skipFreeze`, etc.) are parsed with an explicit allow-list: only the tokens `true`, `1`, `yes`, `on` (case-insensitive) enable a rule. **Any other value — including an arbitrary non-empty string — leaves the rule off.** (This avoids the common bug where any present env var enables a feature.) Thresholds are parsed as finite numbers and are only consulted when their rule is enabled.
+
 ## Pipeline Placement & Restriction Interaction
 
-1. Resolve the method scale (cache hit or fresh compute; existing behavior).
-2. Run the existing **California rain restriction first** (unchanged): when the restriction bit is set and `precip > 0.1`, it sets `scale = 0`.
-3. Run **weather skips**. A skip **only overrides when it actually fires**: on trigger it sets `scale = 0` and `skipReason`; if no rule fires it leaves `scale`/`rawData` untouched — it never clobbers a restriction-induced `0` with empty metadata, and never invents `skip`/`skipReason`.
+The skip overlay is appended **after** the existing `getWateringData` flow, which is otherwise unchanged:
+
+1. **Existing, unchanged:** resolve the method result — a cache hit returns the cached value; a cache miss runs the method, then the California restriction (on the miss path, using its current `getWateringData`/method `wateringData` precip), then stores the result. The restriction remains cached as today.
+2. **New skip overlay (this feature):** after the result is resolved, if `>= 1` skip is enabled, fetch skip weather (memoized, fail-open) and run `evaluateSkips`. On a trigger, build a **fresh** response with `scale = 0`, `rawData.skip = 1`, `rawData.skipReason`. If no rule fires, leave the resolved result untouched — never clobber a restriction-induced `0`, never invent `skip`/`skipReason`.
+3. The overlay never mutates or re-caches anything; it is purely additive and per-request.
 
 ## Legacy Response Survival
 
@@ -124,7 +129,7 @@ Environment defaults, overridable per request via `wto`. Skips are stateless, so
 - **`evaluateSkips` (pure units):** each rule fires/does-not at the inclusive boundary; `minTemp ?? temp` fallback (local case); a missing field disables only its own rule while others still evaluate; first-trigger-wins ordering (freeze before wind before rain); nothing enabled -> `{ skip: false }`; reason strings are ASCII-only (no `= < > "`).
 - **Memo:** key isolation (different provider / coords / PWS -> different entries); TTL expiry forces a refetch; `getWeatherData` throw -> `undefined`, no failure memoized.
 - **Route-level (`weather.spec.ts`):**
-  - A freezing `getWeatherData` forces `scale = 0` and `rawData.skipReason` survives `convertToLegacyFormat`, verified across two methods (e.g. Zimmerman and WaterBudget).
+  - A freezing `getWeatherData` forces `scale = 0` and `rawData.skipReason` survives `convertToLegacyFormat`, verified across two **always-present** methods (**Zimmerman and ETo**) so the suite does not depend on the WaterBudget feature existing in the branch; optionally add WaterBudget as a third case when it is present.
   - A **cache-hit** request is still skip-evaluated (proves live evaluation, not cached skip).
   - The existing restriction has already set `scale = 0` **and** no skip fires -> the guard adds **no** `skip`/`skipReason` and preserves the restriction's `0` (proves the guard neither invents nor erases metadata).
   - A skipped legacy (querystring) response round-trips intact.
@@ -135,6 +140,7 @@ Environment defaults, overridable per request via `wto`. Skips are stateless, so
 - Skip-as-*reduction* (v1 is a hard `scale = 0`).
 - Per-zone skips (the service operates per location; the firmware owns zones).
 - Dynamic / ET-derived thresholds; provider-specific skip tuning.
+- **"All guards live / cache only the raw method result"** — restructuring the route so the California restriction is *also* re-evaluated live (and the cache holds only the pre-restriction method result). This is a separate, optional follow-up; this feature deliberately leaves the existing cache and restriction semantics untouched and only adds the additive skip overlay.
 
 ## Cross-Cutting Constraints
 
