@@ -5,8 +5,8 @@
 			"rawData": {
 				"wp": "Manual"
 			},
-			"sunrise": 332,
-			"sunset": 1203,
+			"sunrise": 333,
+			"sunset": 1202,
 			"eip": 16909060,
 			"errCode": 0
 		}
@@ -15,8 +15,8 @@
 		"01002": {
 			"scale": 0,
 			"tz": 32,
-			"sunrise": 332,
-			"sunset": 1203,
+			"sunrise": 333,
+			"sunset": 1202,
 			"eip": 16909060,
 			"rawData": {
 				"h": 98.5,
