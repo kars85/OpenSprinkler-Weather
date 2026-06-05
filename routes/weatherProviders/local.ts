@@ -17,6 +17,8 @@ var queue: Array<Observation> = [],
 	lastRainEpoch = 0,
 	lastRainCount: number;
 
+let warnedUnauthenticatedLocalPws = false;
+
 // Enhanced interfaces for forecast capability
 export interface ForecastCapabilities {
     temperature: boolean;
@@ -55,25 +57,86 @@ export abstract class EnhancedWeatherProvider extends WeatherProvider {
     }
 }
 
+const measurementRanges: { [key: string]: { min?: number, max?: number } } = {
+	tempf: { min: -100, max: 160 },
+	humidity: { min: 0, max: 100 },
+	windspeedmph: { min: 0, max: 250 },
+	solarradiation: { min: 0, max: 1500 },
+	dailyrainin: { min: 0 },
+	rainin: { min: 0 },
+};
+
+function getAuthTokens(req: express.Request): string[] {
+	const tokens: string[] = [];
+	for (const key of ["key", "token"]) {
+		const queryValue = req.query[key];
+		const token = Array.isArray(queryValue) ? queryValue[0] : queryValue;
+		if (typeof token === "string") tokens.push(token);
+	}
+
+	const authHeader = req.headers.authorization;
+	if (authHeader) {
+		const match = authHeader.match(/^Bearer\s+(.+)$/i);
+		tokens.push(match ? match[1] : authHeader);
+	}
+
+	return tokens;
+}
+
+function isLocalPwsAuthenticated(req: express.Request): boolean {
+	const expectedToken = process.env.LOCAL_PWS_TOKEN;
+	if (!expectedToken) {
+		if (!warnedUnauthenticatedLocalPws) {
+			console.warn("LOCAL_PWS_TOKEN is not set; local PWS ingest is accepting unauthenticated writes.");
+			warnedUnauthenticatedLocalPws = true;
+		}
+		return true;
+	}
+	return getAuthTokens(req).some(token => token === expectedToken);
+}
+
 function getMeasurement(req: express.Request, key: string): number {
-	let value: number;
-	return ( key in req.query ) && !isNaN( value = parseFloat( req.query[key] as string ) ) && ( value !== -9999.0 ) ? value : undefined;
+	if (!(key in req.query)) return undefined;
+
+	const rawValue = req.query[key];
+	const rawScalar = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+	if (typeof rawScalar !== "string") return undefined;
+
+	const rawString = rawScalar.trim();
+	if (rawString === "") return undefined;
+
+	const value = Number(rawString);
+	if (value === -9999.0 || !Number.isFinite(value)) return undefined;
+
+	const range = measurementRanges[key];
+	if (range && ((range.min !== undefined && value < range.min) || (range.max !== undefined && value > range.max))) {
+		return undefined;
+	}
+
+	return value;
 }
 
 export const captureWUStream = async function( req: express.Request, res: express.Response ) {
+	if (!isLocalPwsAuthenticated(req)) {
+		res.status(401).send("unauthorized\n");
+		return;
+	}
+
 	let rainCount = getMeasurement(req, "dailyrainin");
+	let solarRadiation = getMeasurement(req, "solarradiation");
+	let rainRate = getMeasurement(req, "rainin");
 
 	const obs: Observation = {
 		timestamp: req.query.dateutc === "now" ? moment().unix() : moment( String(req.query.dateutc) + "Z" ).unix(),
 		temp: getMeasurement(req, "tempf"),
 		humidity: getMeasurement(req, "humidity"),
 		windSpeed: getMeasurement(req, "windspeedmph"),
-		solarRadiation: getMeasurement(req, "solarradiation") * 24 / 1000,	// Convert to kWh/m^2 per day
-		precip: rainCount < lastRainCount ? rainCount : rainCount - lastRainCount,
+		solarRadiation: solarRadiation !== undefined ? solarRadiation * 24 / 1000 : undefined,	// Convert to kWh/m^2 per day
+		precip: rainCount !== undefined && lastRainCount !== undefined ? (rainCount < lastRainCount ? rainCount : rainCount - lastRainCount) : undefined,
 	};
 
-	lastRainEpoch = getMeasurement(req, "rainin") > 0 ? obs.timestamp : lastRainEpoch;
-	lastRainCount = isNaN(rainCount) ? lastRainCount : rainCount;
+	lastRainEpoch = rainRate > 0 ? obs.timestamp : lastRainEpoch;
+	lastRainCount = rainCount !== undefined ? rainCount : lastRainCount;
 
 	queue.unshift(obs);
 
