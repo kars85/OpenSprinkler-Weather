@@ -43,6 +43,37 @@ describe( "WaterBudgetAdjustmentMethod", () => {
 		expect( res.scale ).to.equal( 0 );
 	} );
 
+	it( "holds last scale when weather data is non-finite (missing fields)", async () => {
+		const coords: GeoCoordinates = [ 42.20, -72.20 ];
+		const good = await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, coords, new StubProvider( etoData() ) );
+		const bad = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+			opts, coords, new StubProvider( etoData({ periodStartTime: 1557792000, precip: NaN }) )
+		);
+		expect( bad.scale ).to.equal( good.scale );
+		expect( ( bad.rawData as any ).reason.toLowerCase() ).to.contain( "incomplete" );
+	} );
+
+	it( "throws a CodedError on non-finite weather with no prior state", async () => {
+		let threw: any;
+		try {
+			await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, [ 8.88, 8.88 ], new StubProvider( etoData({ precip: NaN }) ) );
+		} catch ( e ) { threw = e; }
+		expect( threw ).to.be.instanceOf( CodedError );
+	} );
+
+	it( "clamps BUDGET_RUNOFF above 1 so rain is not over-credited", async () => {
+		const saved = process.env.BUDGET_RUNOFF;
+		process.env.BUDGET_RUNOFF = "2";
+		try {
+			const res = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				opts, [ 42.21, -72.21 ], new StubProvider( etoData({ precip: 0.5 }) )
+			);
+			expect( ( res.rawData as any ).p ).to.be.at.most( 0.5 );
+		} finally {
+			if ( saved === undefined ) { delete process.env.BUDGET_RUNOFF; } else { process.env.BUDGET_RUNOFF = saved; }
+		}
+	} );
+
 	it( "persists state across calls for the same location (rain memory)", async () => {
 		const coords: GeoCoordinates = [ 42.12, -72.12 ];
 		await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, coords, new StubProvider( etoData({ precip: 5 }) ) );

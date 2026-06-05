@@ -147,7 +147,7 @@ Documentation will state that `loc` accepts ZIP / place / GPS / **street address
 
 ## Error Handling — fail open, never corrupt state, never crash watering
 
-- **Negative / missing ETo:** `calculateETo` has no lower bound and can return a small negative value; the model clamps `ETc` (and `referenceETc`) to `≥ 0` so a negative ETo can never inflate the rain bank (fake memory).
+- **Negative / non-finite ETo:** `calculateETo` has no lower bound and missing weather fields can yield `NaN`. The model **coerces non-finite values to 0** and clamps `ETc`/`referenceETc`/`precip`/prior-`rainBank` to `≥ 0` — the coercion is essential because `Math.max(0, NaN) === NaN`, which would otherwise persist a corrupted (NaN) rain bank that poisons the location indefinitely. The method additionally **fails open**: if `eto` or `precip` is non-finite it holds the last scale (stale) when prior state exists, or throws `MissingWeatherField`, rather than running the model on bad data. `BUDGET_RUNOFF` is clamped to `[0, 1]` so rain cannot be over-credited.
 - **Transient weather failure** (provider down / fields missing): do not touch `rainBank`; return the last stored `scale` with a `reason` flagged `(stale: weather unavailable)`. If there is no stored state yet, propagate a coded error (today's behavior).
 - **State-store read/write failure:** treat as a cold start (`rainBank = 0`), log a WARN, continue. A disk hiccup must never block irrigation.
 - **Baseline ETo unavailable** (data file absent / out of bounds): fall back to `BUDGET_DEFAULT_REF_ETO` as the normalizer.

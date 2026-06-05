@@ -7,7 +7,7 @@ import { calculateETo, EToData, EToScalingAdjustmentOptions } from "./EToAdjustm
 import { getBaselineDailyETo } from "../baselineETo";
 import { BudgetParams, BudgetState, DecisionRecord, step } from "./SoilMoistureModel";
 import { FileStateStore, StateStore } from "../state/StateStore";
-import { makeCodedError } from "../../errors";
+import { CodedError, ErrorCode, makeCodedError } from "../../errors";
 
 const DEFAULT_STATE_FILE = __dirname + "/../../waterBudgetState.json";
 const store: StateStore = new FileStateStore( process.env.BUDGET_STATE_FILE || DEFAULT_STATE_FILE );
@@ -35,7 +35,7 @@ function resolveParams(): BudgetParams {
 	return {
 		kc: envNum( "BUDGET_KC", 0.9 ),
 		maxScale: envNum( "BUDGET_MAX_SCALE", 200 ),
-		runoffFactor: envNonNegativeNum( "BUDGET_RUNOFF", 1.0 ),
+		runoffFactor: Math.min( 1, envNonNegativeNum( "BUDGET_RUNOFF", 1.0 ) ),
 		rainBankCapDays: envNum( "BUDGET_RAINBANK_CAP_DAYS", 14 ),
 		gapResetDays: envNum( "BUDGET_GAP_RESET", 2 )
 	};
@@ -105,6 +105,21 @@ async function calculateWaterBudgetScale(
 	const eto = calculateETo( etoData, elevation, coordinates );
 	const today = localDateString( coordinates, etoData.periodStartTime );
 	const prev = await safeGet( key );
+
+	// Fail open on incomplete weather: if ET or precip is non-finite (missing fields or
+	// junk from the provider), do NOT run the model — it would persist a corrupted (NaN)
+	// rain bank. Hold the last scale if we have prior state, else surface a coded error.
+	if ( !Number.isFinite( eto ) || !Number.isFinite( etoData.precip ) ) {
+		if ( prev ) {
+			return {
+				scale: prev.lastScale,
+				rawData: { wp: "WaterBudget", scale: prev.lastScale, reason: `Scale ${ prev.lastScale }%: incomplete weather data, holding last value (stale).` },
+				wateringData: etoData
+			};
+		}
+		throw new CodedError( ErrorCode.MissingWeatherField );
+	}
+
 	if ( prev && prev.lastUpdated === today ) {
 		const last = prev.history[ prev.history.length - 1 ];
 		if ( last ) {

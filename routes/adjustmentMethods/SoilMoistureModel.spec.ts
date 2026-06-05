@@ -91,4 +91,14 @@ describe( "SoilMoistureModel", () => {
 		const d2 = step( seeded, input({ today: "2019-05-14", eto: -0.5, precip: 0 }) );
 		expect( d2.state.rainBank ).to.be.at.most( seeded.rainBank );
 	} );
+
+	it( "never emits NaN from non-finite inputs (no corrupted bank)", () => {
+		const r = step( undefined, input({ eto: NaN, precip: NaN, referenceEto: NaN }) );
+		expect( Number.isFinite( r.scale ) ).to.equal( true );
+		expect( Number.isFinite( r.state.rainBank ) ).to.equal( true );
+		// A malformed prior bank (NaN) must be treated as 0, not propagated.
+		const bad = { rainBank: NaN, lastUpdated: "2019-05-12", lastScale: 0, history: [] } as any;
+		const r2 = step( bad, input({ today: "2019-05-13" }) );
+		expect( Number.isFinite( r2.state.rainBank ) ).to.equal( true );
+	} );
 } );

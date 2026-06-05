@@ -57,6 +57,11 @@ function round2( v: number ): number {
 	return Math.round( v * 100 ) / 100;
 }
 
+/** Coerce non-finite numbers (NaN / Infinity) to 0 so bad inputs never poison the budget. */
+function fin( v: number ): number {
+	return Number.isFinite( v ) ? v : 0;
+}
+
 /** Whole days between two YYYY-MM-DD strings (b - a). UTC-based and pure. */
 export function daysBetween( a: string, b: string ): number {
 	const ms = Date.parse( a + "T00:00:00Z" );
@@ -83,11 +88,13 @@ function buildReason( p: {
  */
 export function step( prev: BudgetState | undefined, input: StepInput ): StepResult {
 	const { today, eto, precip, referenceEto, resolvedLocation, params } = input;
-	// Clamp ET to >= 0: calculateETo has no lower bound and can return a small
-	// negative value, which would otherwise INFLATE the rain bank (fake memory).
-	const etc = Math.max( 0, eto ) * params.kc;
-	const referenceEtc = Math.max( 0, referenceEto ) * params.kc;
-	const effectiveRain = Math.max( 0, precip ) * params.runoffFactor;
+	// Clamp ET to >= 0 AND coerce non-finite values to 0: calculateETo has no lower
+	// bound (a small negative would fake rain memory), and missing weather fields can
+	// yield NaN — note Math.max(0, NaN) === NaN, which would otherwise persist a
+	// corrupted (NaN) rain bank and poison this location forever.
+	const etc = Math.max( 0, fin( eto ) ) * params.kc;
+	const referenceEtc = Math.max( 0, fin( referenceEto ) ) * params.kc;
+	const effectiveRain = Math.max( 0, fin( precip ) ) * params.runoffFactor;
 
 	// Same-day re-poll: return the stored result unchanged (idempotent).
 	if ( prev && prev.lastUpdated === today ) {
@@ -96,7 +103,7 @@ export function step( prev: BudgetState | undefined, input: StepInput ): StepRes
 	}
 
 	// Gap reset: a long outage means we missed days of weather; drop stored memory.
-	let rainBankBefore = prev ? prev.rainBank : 0;
+	let rainBankBefore = prev ? fin( prev.rainBank ) : 0;
 	let gapReset = false;
 	if ( prev ) {
 		const gap = daysBetween( prev.lastUpdated, today );
