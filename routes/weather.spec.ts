@@ -30,32 +30,27 @@ describe('Watering Data', () => {
         expect( expressMocks.response._getJSON() ).to.eql( expected.noWeather[location] );
     });
 
-    // SKIPPED: This test is stale relative to the current fork's behavior and cannot pass
-    // without regenerating fixtures for unverified code:
-    //   1. Provider selection no longer honors WEATHER_PROVIDER=OWM (it comes from the `wto`
-    //      param or defaults to Apple), so this request resolves to Apple -> NoAPIKeyProvided (35).
-    //   2. The OWM provider was rewritten to the One Call `day_summary` API (two requests, new
-    //      JSON shape); test/replies.json still holds the old OWM format and won't parse.
-    // Regenerating replies.json for the new API would enshrine machine-generated expected values
-    // for the rewritten (and not independently verified) OWM path. Tracked on issue #2.
-    it.skip('OpenWeatherMap Lookup (Adjustment Method 1, Location 01002)', async () => {
+    it('OpenWeatherMap Lookup (Adjustment Method 1, Location 01002)', async () => {
         mockGeocoder();
-        mockOWM();
+        mockOWMWatering();
 
-        const expressMocks = createExpressMocks(1, location);
+        // Provider selection comes from the `wto` param (WEATHER_PROVIDER env is only honored
+        // for "local"), so explicitly request the OWM provider.
+        const expressMocks = createExpressMocks(1, location, '"provider":"OWM"');
         await getWateringData(expressMocks.request, expressMocks.response);
         expect( expressMocks.response._getJSON() ).to.eql( expected.adjustment1[location] );
     });
 });
 
-function createExpressMocks(method: number, location: string) {
+function createExpressMocks(method: number, location: string, wto?: string) {
+    // req.query is derived from the URL querystring by the mock, so encode wto into the URL.
+    const wtoQuery = wto ? `&wto=${ encodeURIComponent( wto ) }` : "";
+    const query: any = { loc: location, format: 'json' };
+    if ( wto ) query.wto = wto;
     const request = new MockExpressRequest({
         method: 'GET',
-        url: `/${method}?loc=${location}&format=json`,
-        query: {
-            loc: location,
-            format: 'json'
-        },
+        url: `/${method}?loc=${location}&format=json${ wtoQuery }`,
+        query,
         params: [ method ],
         headers: {
             'x-forwarded-for': '127.0.0.1'
@@ -75,6 +70,16 @@ function mockOWM() {
         .filteringPath( function() { return "/"; } )
         .get( "/" )
         .reply( 200, replies[location].OWMData );
+}
+
+function mockOWMWatering() {
+    // The rewritten OWM provider's getWateringData makes two HTTPS requests:
+    // the One Call `day_summary` (yesterday) and the One Call `current` (today).
+    nock( 'https://api.openweathermap.org' )
+        .get( '/data/3.0/onecall/day_summary' ).query( true )
+        .reply( 200, replies[location].OWMDaySummary )
+        .get( '/data/3.0/onecall' ).query( true )
+        .reply( 200, replies[location].OWMToday );
 }
 
 function mockGeocoder() {
