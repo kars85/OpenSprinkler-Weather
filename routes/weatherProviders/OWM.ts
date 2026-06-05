@@ -23,7 +23,7 @@ export default class OWMWeatherProvider extends WeatherProvider {
 		//Get previous date by using UTC
 		const timezone = moment().tz( geoTZ( coordinates[ 0 ], coordinates[ 1 ] )[ 0 ] ).utcOffset();
 		let time = Date.now();
-		time -= (86400000 + timezone * 3600);
+		time -= (86400000 + timezone * 60000);
 		const date = new Date(time);
 		let day = this.pad(date.getUTCDate());
 		let month = this.pad(date.getUTCMonth() + 1);
