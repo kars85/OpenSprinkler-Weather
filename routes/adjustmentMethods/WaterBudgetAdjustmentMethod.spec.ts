@@ -59,6 +59,24 @@ describe( "WaterBudgetAdjustmentMethod", () => {
 		expect( b.scale ).to.equal( a.scale );
 	} );
 
+	it( "reuses the stored rawData inputs on a same-day re-poll", async () => {
+		const coords: GeoCoordinates = [ 42.131, -72.131 ];
+		const a = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+			opts,
+			coords,
+			new StubProvider( etoData({ precip: 0.4, solarRadiation: 6 }) )
+		);
+		const b = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+			opts,
+			coords,
+			new StubProvider( etoData({ precip: 1.9, solarRadiation: 10, minTemp: 10, maxTemp: 110 }) )
+		);
+		expect( b.scale ).to.equal( a.scale );
+		expect( ( b.rawData as any ).eto ).to.equal( ( a.rawData as any ).eto );
+		expect( ( b.rawData as any ).etc ).to.equal( ( a.rawData as any ).etc );
+		expect( ( b.rawData as any ).p ).to.equal( ( a.rawData as any ).p );
+	} );
+
 	it( "holds the last scale (flagged stale) when weather fails but state exists", async () => {
 		const coords: GeoCoordinates = [ 42.14, -72.14 ];
 		const good = await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, coords, new StubProvider( etoData() ) );
@@ -73,6 +91,23 @@ describe( "WaterBudgetAdjustmentMethod", () => {
 			await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, [ 9.99, 9.99 ], new StubProvider( null, true ) );
 		} catch ( e ) { threw = e; }
 		expect( threw ).to.be.instanceOf( CodedError );
+	} );
+
+	it( "honors BUDGET_RUNOFF=0 so rain does not reduce the scale", async () => {
+		const previous = process.env.BUDGET_RUNOFF;
+		process.env.BUDGET_RUNOFF = "0";
+		try {
+			const dry = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				opts, [ 42.141, -72.141 ], new StubProvider( etoData({ precip: 0 }) )
+			);
+			const rainy = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				opts, [ 42.142, -72.142 ], new StubProvider( etoData({ precip: 3 }) )
+			);
+			expect( rainy.scale ).to.equal( dry.scale );
+		} finally {
+			if ( previous === undefined ) delete process.env.BUDGET_RUNOFF;
+			else process.env.BUDGET_RUNOFF = previous;
+		}
 	} );
 } );
 

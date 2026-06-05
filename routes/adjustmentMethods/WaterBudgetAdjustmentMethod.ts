@@ -5,7 +5,7 @@ import { GeoCoordinates, PWS } from "../../types";
 import { WeatherProvider } from "../weatherProviders/WeatherProvider";
 import { calculateETo, EToData, EToScalingAdjustmentOptions } from "./EToAdjustmentMethod";
 import { getBaselineDailyETo } from "../baselineETo";
-import { BudgetParams, BudgetState, step } from "./SoilMoistureModel";
+import { BudgetParams, BudgetState, DecisionRecord, step } from "./SoilMoistureModel";
 import { FileStateStore, StateStore } from "../state/StateStore";
 import { makeCodedError } from "../../errors";
 
@@ -15,6 +15,11 @@ const store: StateStore = new FileStateStore( process.env.BUDGET_STATE_FILE || D
 function envNum( name: string, fallback: number ): number {
 	const v = Number( process.env[ name ] );
 	return Number.isFinite( v ) && v > 0 ? v : fallback;
+}
+
+function envNonNegativeNum( name: string, fallback: number ): number {
+	const v = Number( process.env[ name ] );
+	return Number.isFinite( v ) && v >= 0 ? v : fallback;
 }
 
 function optNum( value: any, fallback: number ): number {
@@ -30,7 +35,7 @@ function resolveParams(): BudgetParams {
 	return {
 		kc: envNum( "BUDGET_KC", 0.9 ),
 		maxScale: envNum( "BUDGET_MAX_SCALE", 200 ),
-		runoffFactor: envNum( "BUDGET_RUNOFF", 1.0 ),
+		runoffFactor: envNonNegativeNum( "BUDGET_RUNOFF", 1.0 ),
 		rainBankCapDays: envNum( "BUDGET_RAINBANK_CAP_DAYS", 14 ),
 		gapResetDays: envNum( "BUDGET_GAP_RESET", 2 )
 	};
@@ -60,6 +65,18 @@ function round( v: number, dp: number ): number {
 	return Math.round( v * f ) / f;
 }
 
+function buildRawDataFromDecision( weatherProvider: string, scale: number, record: DecisionRecord ) {
+	return {
+		wp: weatherProvider,
+		scale,
+		eto: record.eto,
+		etc: record.etc,
+		p: record.effectiveRain,
+		bank: round( record.rainBankAfter, 2 ),
+		reason: record.reason
+	};
+}
+
 async function calculateWaterBudgetScale(
 	adjustmentOptions: AdjustmentOptions,
 	coordinates: GeoCoordinates,
@@ -87,6 +104,17 @@ async function calculateWaterBudgetScale(
 
 	const eto = calculateETo( etoData, elevation, coordinates );
 	const today = localDateString( coordinates, etoData.periodStartTime );
+	const prev = await safeGet( key );
+	if ( prev && prev.lastUpdated === today ) {
+		const last = prev.history[ prev.history.length - 1 ];
+		if ( last ) {
+			return {
+				scale: prev.lastScale,
+				rawData: buildRawDataFromDecision( etoData.weatherProvider, prev.lastScale, last ),
+				wateringData: etoData
+			};
+		}
+	}
 
 	let referenceEto: number;
 	try {
@@ -95,23 +123,25 @@ async function calculateWaterBudgetScale(
 		referenceEto = envNum( "BUDGET_DEFAULT_REF_ETO", 0.15 );
 	}
 
-	const prev = await safeGet( key );
 	const { state, scale, reason } = step( prev, {
 		today, eto, precip: etoData.precip, referenceEto, resolvedLocation: undefined, params
 	} );
 	await safeSet( key, state );
+	const last = state.history[ state.history.length - 1 ];
 
 	return {
 		scale,
-		rawData: {
-			wp: etoData.weatherProvider,
-			scale,
-			eto: round( eto, 3 ),
-			etc: round( eto * params.kc, 3 ),
-			p: round( etoData.precip, 2 ),
-			bank: round( state.rainBank, 2 ),
-			reason
-		},
+		rawData: last
+			? buildRawDataFromDecision( etoData.weatherProvider, scale, last )
+			: {
+				wp: etoData.weatherProvider,
+				scale,
+				eto: round( eto, 3 ),
+				etc: round( eto * params.kc, 3 ),
+				p: round( etoData.precip * params.runoffFactor, 2 ),
+				bank: round( state.rainBank, 2 ),
+				reason
+			},
 		wateringData: etoData
 	};
 }

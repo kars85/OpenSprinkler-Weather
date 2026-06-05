@@ -43,3 +43,5 @@ js/
 .abc-failures.json
 .abc-weights.json
 .abc-audit-hash
+.empirica_reflex_logs/
+.claude-octopus/

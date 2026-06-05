@@ -54,6 +54,18 @@ describe('Watering Data', () => {
         expect( body.rawData ).to.be.an('object');
         expect( body.rawData.reason ).to.be.a('string').and.contain('Scale');
     });
+
+    it('Water Budget Lookup (Adjustment Method 4) uses the cached same-day scale for caching providers', async () => {
+        mockOpenMeteoETo();
+
+        const expressMocksA = createExpressMocks(4, '42.3732,-72.5199', '"provider":"OpenMeteo"');
+        await getWateringData(expressMocksA.request, expressMocksA.response);
+
+        const expressMocksB = createExpressMocks(4, '42.3732,-72.5199', '"provider":"OpenMeteo"');
+        await getWateringData(expressMocksB.request, expressMocksB.response);
+
+        expect( expressMocksB.response._getJSON() ).to.eql( expressMocksA.response._getJSON() );
+    });
 });
 
 function createExpressMocks(method: number, location: string, wto?: string) {
@@ -103,6 +115,25 @@ function mockGeocoder() {
     nock( 'http://autocomplete.wunderground.com' )
         .get( /.*/ )
         .reply( 200, { RESULTS: [ { lat: "42.3732", lon: "-72.5199", tz: "America/New_York" } ] } );
+}
+
+function mockOpenMeteoETo() {
+    nock( 'https://api.open-meteo.com' )
+        .get( '/v1/forecast' )
+        .query( true )
+        .once()
+        .reply( 200, {
+            hourly: {
+                time: [
+                    1557619200, 1557622800, 1557626400, 1557630000
+                ],
+                temperature_2m: [ 55, 65, 72, 60 ],
+                relativehumidity_2m: [ 80, 60, 40, 70 ],
+                precipitation: [ 0, 0.1, 0, 0 ],
+                direct_radiation: [ 100, 250, 400, 150 ],
+                windspeed_10m: [ 3, 5, 4, 2 ]
+            }
+        } );
 }
 
 
