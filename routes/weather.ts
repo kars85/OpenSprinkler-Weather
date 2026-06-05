@@ -129,6 +129,11 @@ function convertToLegacyFormat(enhancedData: any, adjustmentMethod: AdjustmentMe
 			Object.assign(legacyData.rawData, {
 				h: rawDataSource.h, p: rawDataSource.p, t: rawDataSource.t, raining: rawDataSource.raining
 			});
+		} else if (adjustmentMethod === WaterBudgetAdjustmentMethod) {
+			Object.assign(legacyData.rawData, {
+				eto: rawDataSource.eto, etc: rawDataSource.etc, p: rawDataSource.p,
+				bank: rawDataSource.bank, reason: rawDataSource.reason
+			});
 		}
 	} else {
 		debugLog("DEBUG convertToLegacyFormat: enhancedData.rawData is missing.");

@@ -1402,7 +1402,9 @@
         "humidity": 99,
         "weather": {
           "main": "Rain"
-        }
+        },
+        "clouds": 20,
+        "wind_speed": 5
       }
     }
   }

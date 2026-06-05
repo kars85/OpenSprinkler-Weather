@@ -40,6 +40,20 @@ describe('Watering Data', () => {
         await getWateringData(expressMocks.request, expressMocks.response);
         expect( expressMocks.response._getJSON() ).to.eql( expected.adjustment1[location] );
     });
+
+    it('Water Budget Lookup (Adjustment Method 4, Location 01002)', async () => {
+        mockGeocoder();
+        mockOWMWatering();
+
+        const expressMocks = createExpressMocks(4, location, '"provider":"OWM"');
+        await getWateringData(expressMocks.request, expressMocks.response);
+
+        const body: any = expressMocks.response._getJSON();
+        expect( body.scale ).to.be.a('number');
+        expect( body.scale ).to.be.within(0, 200);
+        expect( body.rawData ).to.be.an('object');
+        expect( body.rawData.reason ).to.be.a('string').and.contain('Scale');
+    });
 });
 
 function createExpressMocks(method: number, location: string, wto?: string) {
