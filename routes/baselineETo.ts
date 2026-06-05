@@ -64,6 +64,16 @@ export const getBaselineETo = async function( req: express.Request, res: express
 	} );
 };
 
+/**
+ * The annual-average daily reference ETo (inches/day) for a location, from the
+ * shipped baseline ETo data file. Throws { message, code } if the data file is
+ * unavailable or the location is out of bounds. Used by the WaterBudget method
+ * as the "normal day" reference.
+ */
+export async function getBaselineDailyETo( coordinates: GeoCoordinates ): Promise< number > {
+	return calculateAverageDailyETo( coordinates );
+}
+
 async function calculateAverageDailyETo( coordinates: GeoCoordinates ): Promise< number > {
 	if (!FILE_META) {
         console.error("DEBUG: calculateAverageDailyETo - FILE_META not loaded.");
