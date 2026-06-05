@@ -460,6 +460,8 @@ async function httpRequest( url: string, headers?: any, body?: any ): Promise< s
 	return new Promise< string >( ( resolve, reject ) => {
 		const urlMatch = url.match( filters.url );
 		if (!urlMatch) return reject(new Error(`Invalid URL format: ${redactLogString(url)}`));
+		const configuredTimeoutMs = Number(process.env.HTTP_REQUEST_TIMEOUT_MS);
+		const requestTimeoutMs = Number.isSafeInteger(configuredTimeoutMs) && configuredTimeoutMs > 0 ? configuredTimeoutMs : 10000;
 		
 		const isHttps = url.startsWith("https");
 		const options: https.RequestOptions = {
@@ -483,6 +485,9 @@ async function httpRequest( url: string, headers?: any, body?: any ): Promise< s
 			res.setEncoding('utf8');
 			res.on("data", (chunk) => { responseData += chunk; });
 			res.on("end", () => { resolve(responseData); });
+		});
+		req.setTimeout(requestTimeoutMs, () => {
+			req.destroy(new Error(`HTTP request timed out after ${requestTimeoutMs} ms for URL '${redactLogString(url)}'.`));
 		});
 		req.on("error", (err) => { reject(err); });
 		if (body) req.write(body);
