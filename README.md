@@ -61,6 +61,8 @@ For more information on the "WeeWX Solution" click [here](docs/weewx.md)
 - Davis Vantage: a solution for this PWS has been kindly provided by @rmloeb [here](docs/davis-vantage.md)
 - Netatmo: instructions for configuring this PWS have been greatfully provided by @franzstein [here](docs/netatmo.md)
 
+- For multi-day, rain-aware **Water-Budget** watering (adjustment method 4), see [here](docs/water-budget.md)
+
 ## Docker
 
 It is possible to build a self-contained docker image from this repository.  It can then be used to run the service
