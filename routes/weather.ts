@@ -49,7 +49,11 @@ const cache = new WateringScaleCache();
 const LEGACY_FIRMWARE_SUPPORT = process.env.LEGACY_FIRMWARE_SUPPORT !== 'false';
 const SIMPLIFIED_RESPONSE_FORMAT = process.env.SIMPLIFIED_RESPONSE_FORMAT !== 'false';
 
-console.log(`DEBUG: Backward compatibility - Legacy support: ${LEGACY_FIRMWARE_SUPPORT}, Simplified format: ${SIMPLIFIED_RESPONSE_FORMAT}`);
+export function debugLog(...args: any[]) {
+	if (process.env.DEBUG_WEATHER === "true") console.log(...args);
+}
+
+debugLog(`DEBUG: Backward compatibility - Legacy support: ${LEGACY_FIRMWARE_SUPPORT}, Simplified format: ${SIMPLIFIED_RESPONSE_FORMAT}`);
 
 export function redactLogString( value: string ): string {
 	return value
@@ -90,16 +94,16 @@ function isLegacyFirmwareRequest(req: express.Request): boolean {
 		referer.includes('/su'), !req.headers['accept']?.includes('application/json'), req.query.format !== 'json'
 	];
 	const isLegacy = legacyIndicators.some(indicator => indicator);
-	console.log(`DEBUG: Legacy firmware detection - User-Agent: "${userAgent}", Referer: "${referer}", Accept: "${req.headers['accept']}", Query.format: "${req.query.format}", Detected as legacy: ${isLegacy}`);
+	debugLog(`DEBUG: Legacy firmware detection - User-Agent: "${userAgent}", Referer: "${referer}", Accept: "${req.headers['accept']}", Query.format: "${req.query.format}", Detected as legacy: ${isLegacy}`);
 	return isLegacy;
 }
 
 function convertToLegacyFormat(enhancedData: any, adjustmentMethod: AdjustmentMethod): any {
 	if (!SIMPLIFIED_RESPONSE_FORMAT) {
-		console.log("DEBUG convertToLegacyFormat: SIMPLIFIED_RESPONSE_FORMAT is false, returning enhancedData.");
+		debugLog("DEBUG convertToLegacyFormat: SIMPLIFIED_RESPONSE_FORMAT is false, returning enhancedData.");
 		return enhancedData;
 	}
-	console.log("DEBUG convertToLegacyFormat: Converting enhanced response to legacy format. Input:", JSON.stringify(enhancedData));
+	debugLog("DEBUG convertToLegacyFormat: Converting enhanced response to legacy format. Input:", JSON.stringify(enhancedData));
 	const legacyData: any = {
 		scale: enhancedData.scale, rd: enhancedData.rd, tz: enhancedData.tz,
 		sunrise: enhancedData.sunrise, sunset: enhancedData.sunset, eip: enhancedData.eip,
@@ -125,9 +129,9 @@ function convertToLegacyFormat(enhancedData: any, adjustmentMethod: AdjustmentMe
 			});
 		}
 	} else {
-		console.log("DEBUG convertToLegacyFormat: enhancedData.rawData is missing.");
+		debugLog("DEBUG convertToLegacyFormat: enhancedData.rawData is missing.");
 	}
-	console.log("DEBUG convertToLegacyFormat: Legacy format conversion complete. Output:", JSON.stringify(legacyData));
+	debugLog("DEBUG convertToLegacyFormat: Legacy format conversion complete. Output:", JSON.stringify(legacyData));
 	return legacyData;
 }
 
@@ -202,18 +206,18 @@ function checkWeatherRestriction( adjustmentValue: number, weather: BaseWatering
 }
 
 export const getWeatherData = async function( req: express.Request, res: express.Response ) {
-	console.log(`DEBUG getWeatherData: START - Path: ${req.path}, Query: ${JSON.stringify(redactLogValue(req.query))}`);
+	debugLog(`DEBUG getWeatherData: START - Path: ${req.path}, Query: ${JSON.stringify(redactLogValue(req.query))}`);
 	
 	const location: string = getParameter(req.query.loc);
 	let adjustmentOptionsString: string	= getParameter(req.query.wto),
 		adjustmentOptions: AdjustmentOptions;
 
-	console.log(`DEBUG getWeatherData: Raw location: "${location}", Raw adjustmentOptionsString: "${redactLogValue(adjustmentOptionsString)}"`);
+	debugLog(`DEBUG getWeatherData: Raw location: "${location}", Raw adjustmentOptionsString: "${redactLogValue(adjustmentOptionsString)}"`);
 
 	try {
 		adjustmentOptionsString = decodeURIComponent( adjustmentOptionsString.replace( /\\x/g, "%" ) );
 		adjustmentOptions = JSON.parse( "{" + adjustmentOptionsString + "}" );
-		console.log(`DEBUG getWeatherData: Parsed adjustmentOptions: ${JSON.stringify(redactLogValue(adjustmentOptions))}`);
+		debugLog(`DEBUG getWeatherData: Parsed adjustmentOptions: ${JSON.stringify(redactLogValue(adjustmentOptions))}`);
 	} catch ( err ) {
 		console.error(`DEBUG getWeatherData: Failed to parse adjustmentOptions:`, redactLogValue(err));
 		sendWateringError( res, new CodedError( ErrorCode.MalformedAdjustmentOptions ));
@@ -248,13 +252,13 @@ export const getWeatherData = async function( req: express.Request, res: express
 	} else {
 		activeWeatherProvider = WEATHER_PROVIDERS[adjustmentOptions.provider] || WEATHER_PROVIDERS['Apple'];
 	}
-	console.log(`DEBUG getWeatherData: Using provider: ${activeWeatherProvider.constructor.name}`);
+	debugLog(`DEBUG getWeatherData: Using provider: ${activeWeatherProvider.constructor.name}`);
 	
 	const timeData: TimeData = getTimeDataForCoordinates( coordinates );
 	let weatherData: WeatherData;
 	try {
 		weatherData = await activeWeatherProvider.getWeatherData( coordinates, pws );
-		console.log(`DEBUG getWeatherData: ${activeWeatherProvider.constructor.name}.getWeatherData responded with: ${JSON.stringify(weatherData)}`);
+		debugLog(`DEBUG getWeatherData: ${activeWeatherProvider.constructor.name}.getWeatherData responded with: ${JSON.stringify(weatherData)}`);
 	} catch ( err: any ) {
 		console.error(`DEBUG getWeatherData: ${activeWeatherProvider.constructor.name}.getWeatherData failed:`, redactLogValue(err));
 		res.send( "Error: " + redactLogValue(err.message || err) );
@@ -262,13 +266,13 @@ export const getWeatherData = async function( req: express.Request, res: express
 	}
 	
 	const response = { ...timeData, ...weatherData, location: coordinates };
-	console.log(`DEBUG getWeatherData: Final response for /weather endpoint: ${JSON.stringify(response)}`);
+	debugLog(`DEBUG getWeatherData: Final response for /weather endpoint: ${JSON.stringify(response)}`);
 	res.json( response );
-	console.log(`DEBUG getWeatherData: END - Response sent.`);
+	debugLog(`DEBUG getWeatherData: END - Response sent.`);
 };
 
 export const getWateringData = async function( req: express.Request, res: express.Response ) {
-	console.log(`DEBUG getWateringData: START - Path: ${req.path}, Query: ${JSON.stringify(redactLogValue(req.query))}, Params: ${JSON.stringify(redactLogValue(req.params))}`);
+	debugLog(`DEBUG getWateringData: START - Path: ${req.path}, Query: ${JSON.stringify(redactLogValue(req.query))}, Params: ${JSON.stringify(redactLogValue(req.params))}`);
 	const isLegacyRequest = isLegacyFirmwareRequest(req);
 	const adjustmentParam = parseInt(req.params[0], 10);
 
@@ -334,7 +338,7 @@ export const getWateringData = async function( req: express.Request, res: expres
 			weatherProvider = WEATHER_PROVIDERS[adjustmentOptions.provider] || WEATHER_PROVIDERS['Apple'];
 		}
 	}
-	console.log(`DEBUG getWateringData: Selected weather provider: ${weatherProvider.constructor.name}`);
+	debugLog(`DEBUG getWateringData: Selected weather provider: ${weatherProvider.constructor.name}`);
 
 	const initialDataStructure = {
 		scale: undefined, rd: undefined,
@@ -351,7 +355,7 @@ export const getWateringData = async function( req: express.Request, res: expres
 	let dataToSend = { ...initialDataStructure };
 
 	if ( cachedScale ) {
-        console.log(`DEBUG getWateringData: Using cached watering scale: ${JSON.stringify(cachedScale)}`);
+        debugLog(`DEBUG getWateringData: Using cached watering scale: ${JSON.stringify(cachedScale)}`);
 		dataToSend.scale = cachedScale.scale;
 		dataToSend.rawData = cachedScale.rawData;
 		dataToSend.rd = cachedScale.rainDelay;
@@ -361,7 +365,7 @@ export const getWateringData = async function( req: express.Request, res: expres
 			adjustmentMethodResponse = await adjustmentMethod.calculateWateringScale(
 				adjustmentOptions, coordinates, weatherProvider, pws
 			);
-			console.log(`DEBUG getWateringData: ${adjustmentMethod.constructor.name}.calculateWateringScale response: ${JSON.stringify(adjustmentMethodResponse)}`);
+			debugLog(`DEBUG getWateringData: ${adjustmentMethod.constructor.name}.calculateWateringScale response: ${JSON.stringify(adjustmentMethodResponse)}`);
 		} catch ( err ) {
 			sendWateringError( res, makeCodedError( err ), adjustmentMethod !== ManualAdjustmentMethod, isLegacyRequest, outputFormat === "json" );
 			return;
@@ -374,48 +378,39 @@ export const getWateringData = async function( req: express.Request, res: expres
 			let wateringDataForRestriction: BaseWateringData | undefined = adjustmentMethodResponse.wateringData; 
 			if ( !wateringDataForRestriction ) {
 				try {
-                    console.log(`DEBUG getWateringData: Fetching watering data for restriction check from ${weatherProvider.constructor.name}`);
+                    debugLog(`DEBUG getWateringData: Fetching watering data for restriction check from ${weatherProvider.constructor.name}`);
 					wateringDataForRestriction = await weatherProvider.getWateringData( coordinates, pws );
-                    console.log(`DEBUG getWateringData: Watering data for restriction check: ${JSON.stringify(wateringDataForRestriction)}`);
+                    debugLog(`DEBUG getWateringData: Watering data for restriction check: ${JSON.stringify(wateringDataForRestriction)}`);
 				} catch ( err ) {
 					sendWateringError( res, makeCodedError( err ), adjustmentMethod !== ManualAdjustmentMethod, isLegacyRequest, outputFormat === "json" );
 					return;
 				}
 			}
 			if ( wateringDataForRestriction && checkWeatherRestriction( adjustmentParam, wateringDataForRestriction ) ) {
-                console.log(`DEBUG getWateringData: Weather restriction met. Setting scale to 0.`);
+                debugLog(`DEBUG getWateringData: Weather restriction met. Setting scale to 0.`);
 				dataToSend.scale = 0;
 			}
 		}
 		if ( weatherProvider.shouldCacheWateringScale() ) {
             const cacheEntry = { scale: dataToSend.scale, rawData: dataToSend.rawData, rainDelay: dataToSend.rd };
-            console.log(`DEBUG getWateringData: Caching watering scale: ${JSON.stringify(cacheEntry)}`);
+            debugLog(`DEBUG getWateringData: Caching watering scale: ${JSON.stringify(cacheEntry)}`);
 			cache.storeWateringScale( adjustmentParam, coordinates, pws, adjustmentOptions, cacheEntry );
 		}
 	}
 	
-    console.log(`DEBUG getWateringData: Data before legacy conversion (dataToSend): ${JSON.stringify(dataToSend)}`);
+    debugLog(`DEBUG getWateringData: Data before legacy conversion (dataToSend): ${JSON.stringify(dataToSend)}`);
 	let responseData = dataToSend;
 	if ( isLegacyRequest ) {
-        console.log(`DEBUG getWateringData: Applying legacy format conversion because isLegacyRequest is true.`);
+        debugLog(`DEBUG getWateringData: Applying legacy format conversion because isLegacyRequest is true.`);
 		responseData = convertToLegacyFormat( dataToSend, adjustmentMethod );
 	} else {
-        console.log(`DEBUG getWateringData: Not applying legacy format conversion because isLegacyRequest is false.`);
+        debugLog(`DEBUG getWateringData: Not applying legacy format conversion because isLegacyRequest is false.`);
     }
 
-    // --- TEST DATA INJECTION ---
-    const USE_HARDCODED_TEST_DATA = false; // <--- SET THIS TO true TO ENABLE TEST DATA
-    
-    if (USE_HARDCODED_TEST_DATA) {
-        console.warn("DEBUG getWateringData: !!! OVERRIDING WITH SAFE HARDCODED TEST DATA !!!");
-        responseData = getSafeTestResponseObject(remoteAddress, timeData.timezone); 
-    }
-    // --- END TEST DATA INJECTION ---
-
-	console.log(`DEBUG getWateringData: Final responseData to be sent: ${JSON.stringify(responseData)}`);
-	console.log(`DEBUG getWateringData: Sending response - Scale: ${responseData.scale}, Method: ${adjustmentMethod?.constructor?.name || "N/A"}, Legacy: ${isLegacyRequest}, OutputFormat: ${outputFormat === "json" ? "JSON" : "QueryString"}`);
+	debugLog(`DEBUG getWateringData: Final responseData to be sent: ${JSON.stringify(responseData)}`);
+	debugLog(`DEBUG getWateringData: Sending response - Scale: ${responseData.scale}, Method: ${adjustmentMethod?.constructor?.name || "N/A"}, Legacy: ${isLegacyRequest}, OutputFormat: ${outputFormat === "json" ? "JSON" : "QueryString"}`);
 	sendWateringData( res, responseData, outputFormat === "json" );
-	console.log(`DEBUG getWateringData: END - Response sent.`);
+	debugLog(`DEBUG getWateringData: END - Response sent.`);
 };
 
 function sendWateringError( res: express.Response, error: CodedError, resetScale: boolean = true, isLegacyRequest: boolean = false, useJson: boolean = false ) {
@@ -427,7 +422,7 @@ function sendWateringError( res: express.Response, error: CodedError, resetScale
 	
 	if ( isLegacyRequest && SIMPLIFIED_RESPONSE_FORMAT ) {
 		const legacyErrorData: any = { scale: resetScale ? 100 : undefined, errCode: error.errCode };
-		console.log(`DEBUG sendWateringError: Applied legacy format to error response: ${JSON.stringify(legacyErrorData)}`);
+		debugLog(`DEBUG sendWateringError: Applied legacy format to error response: ${JSON.stringify(legacyErrorData)}`);
         sendWateringData( res, legacyErrorData, useJson );
         return;
 	}
@@ -436,7 +431,7 @@ function sendWateringError( res: express.Response, error: CodedError, resetScale
 
 function sendWateringData( res: express.Response, data: object, useJson: boolean = false ) {
 	if ( useJson ) {
-		console.log(`DEBUG sendWateringData: Sending JSON response: ${JSON.stringify(data)}`);
+		debugLog(`DEBUG sendWateringData: Sending JSON response: ${JSON.stringify(data)}`);
 		res.json( data );
 	} else {
 		let formatted = "";
@@ -447,7 +442,7 @@ function sendWateringData( res: express.Response, data: object, useJson: boolean
 			if ( typeof value === "undefined" ) continue;
 			formatted += `&${ key }=${ value }`;
 		}
-		console.log(`DEBUG sendWateringData: Sending QueryString response: "${formatted}"`);
+		debugLog(`DEBUG sendWateringData: Sending QueryString response: "${formatted}"`);
 		res.send( formatted );
 	}
 }

@@ -28,7 +28,6 @@ export enum ErrorCode {
 	InvalidPwsId = 30,
 	/** The PWS API key did not use the correct format. */
 	InvalidPwsApiKey = 31,
-	// TODO use this error code.
 	/** The PWS API returned an error because a bad API key was specified. */
 	PwsAuthenticationError = 32,
 	/** A PWS was specified but the data for the specified AdjustmentMethod cannot be retrieved from a PWS. */

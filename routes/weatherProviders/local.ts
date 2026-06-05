@@ -6,7 +6,7 @@ import { GeoCoordinates, WeatherData, ZimmermanWateringData, PWS } from "../../t
 import { WeatherProvider } from "./WeatherProvider";
 import { EToData, approximateSolarRadiation, CloudCoverInfo } from "../adjustmentMethods/EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
-import { httpJSONRequest } from "../weather";
+import { debugLog, httpJSONRequest } from "../weather";
 
 // Constants
 const ONE_DAY_SECONDS = 24 * 60 * 60;
@@ -167,7 +167,7 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 
 	public async getWeatherData(coordinates: GeoCoordinates): Promise<WeatherData> {
 		this.filterQueue();
-		console.log("DEBUG: LocalWeatherProvider.getWeatherData CALLED. Queue length:", queue.length);
+		debugLog("DEBUG: LocalWeatherProvider.getWeatherData CALLED. Queue length:", queue.length);
 
 		if (queue.length === 0) {
 			console.error("There is insufficient data to support Weather response from local PWS.");
@@ -194,17 +194,17 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 			city: undefined,
 			forecast: []
 		};
-		console.log("DEBUG: LocalWeatherProvider.getWeatherData RETURNING result:", JSON.stringify(weather));
+		debugLog("DEBUG: LocalWeatherProvider.getWeatherData RETURNING result:", JSON.stringify(weather));
 		return weather;
 	}
 
 	public async getWateringData(coordinates: GeoCoordinates): Promise<ZimmermanWateringData> {
 		this.filterQueue();
-		console.log("DEBUG: LocalWeatherProvider.getWateringData CALLED. Initial queue length:", queue.length);
+		debugLog("DEBUG: LocalWeatherProvider.getWateringData CALLED. Initial queue length:", queue.length);
 
 		if (queue.length > 0) {
 			const timeSpanSeconds = queue[0].timestamp - queue[queue.length - 1].timestamp;
-			console.log("DEBUG: Queue time span (seconds):", timeSpanSeconds, "Required (approx):", TWENTY_THREE_HOURS_SECONDS);
+			debugLog("DEBUG: Queue time span (seconds):", timeSpanSeconds, "Required (approx):", TWENTY_THREE_HOURS_SECONDS);
 		}
 
 		if (queue.length === 0 || (queue.length > 0 && (queue[0].timestamp - queue[queue.length - 1].timestamp < TWENTY_THREE_HOURS_SECONDS))) {
@@ -232,8 +232,8 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 			}
 		}
 
-		console.log("DEBUG: LocalWeatherProvider sums - tempSum:", tempSum, "humiditySum:", humiditySum, "precipSum:", precipSum);
-		console.log("DEBUG: LocalWeatherProvider counts - cTemp:", cTemp, "cHumidity:", cHumidity);
+		debugLog("DEBUG: LocalWeatherProvider sums - tempSum:", tempSum, "humiditySum:", humiditySum, "precipSum:", precipSum);
+		debugLog("DEBUG: LocalWeatherProvider counts - cTemp:", cTemp, "cHumidity:", cHumidity);
 
 		if (cTemp === 0 || cHumidity === 0) {
 			console.error("DEBUG: LocalWeatherProvider - cTemp or cHumidity is zero, cannot calculate average for Zimmerman.");
@@ -247,17 +247,17 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 			precip: precipSum,
 			raining: ((moment().unix() - lastRainEpoch) / 3600 < 1), // Check if last rain was within the hour
 		};
-		console.log("DEBUG: LocalWeatherProvider.getWateringData RETURNING result:", JSON.stringify(result));
+		debugLog("DEBUG: LocalWeatherProvider.getWateringData RETURNING result:", JSON.stringify(result));
 		return result;
 	}
 
 	public async getEToData(coordinates: GeoCoordinates): Promise<EToData> {
 		this.filterQueue();
-		console.log("DEBUG: LocalWeatherProvider.getEToData CALLED. Queue length:", queue.length);
+		debugLog("DEBUG: LocalWeatherProvider.getEToData CALLED. Queue length:", queue.length);
 
 		if (queue.length > 0) {
 			const timeSpanSeconds = queue[0].timestamp - queue[queue.length - 1].timestamp;
-			console.log("DEBUG: ETo Queue time span (seconds):", timeSpanSeconds, "Required (approx):", TWENTY_THREE_HOURS_SECONDS);
+			debugLog("DEBUG: ETo Queue time span (seconds):", timeSpanSeconds, "Required (approx):", TWENTY_THREE_HOURS_SECONDS);
 		}
 		
 		if (queue.length === 0 || (queue.length > 0 && (queue[0].timestamp - queue[queue.length - 1].timestamp < TWENTY_THREE_HOURS_SECONDS))) {
@@ -296,9 +296,9 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 			}
 		}
 		
-		console.log("DEBUG: LocalWeatherProvider ETo counts - cSolar:", cSolar, "cWind:", cWind);
-		console.log("DEBUG: LocalWeatherProvider ETo sums - solarSum:", solarSum, "windSum:", windSum, "precipSumForETo:", precipSumForETo);
-		console.log("DEBUG: LocalWeatherProvider ETo min/max - minT:", minTemp, "maxT:", maxTemp, "minH:", minHumidity, "maxH:", maxHumidity);
+		debugLog("DEBUG: LocalWeatherProvider ETo counts - cSolar:", cSolar, "cWind:", cWind);
+		debugLog("DEBUG: LocalWeatherProvider ETo sums - solarSum:", solarSum, "windSum:", windSum, "precipSumForETo:", precipSumForETo);
+		debugLog("DEBUG: LocalWeatherProvider ETo min/max - minT:", minTemp, "maxT:", maxTemp, "minH:", minHumidity, "maxH:", maxHumidity);
 
 		if (cSolar === 0) {
 			console.error("DEBUG: LocalWeatherProvider (ETo) - cSolar is zero, cannot calculate average solar radiation.");
@@ -324,7 +324,7 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 			windSpeed: windSum / cWind,
 			precip: precipSumForETo,
 		};
-		console.log("DEBUG: LocalWeatherProvider.getEToData RETURNING result:", JSON.stringify(result));
+		debugLog("DEBUG: LocalWeatherProvider.getEToData RETURNING result:", JSON.stringify(result));
 		return result;
 	}
 
@@ -343,11 +343,11 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 	// Get comprehensive forecast data from OpenMeteo
 	async getForecastData(coordinates: GeoCoordinates, days: number = this.forecastDays): Promise<ForecastEToData[]> {
 		if (!this.enableForecast) {
-			console.log("DEBUG: Forecast disabled, throwing error");
+			debugLog("DEBUG: Forecast disabled, throwing error");
 			throw new CodedError(ErrorCode.UnsupportedAdjustmentMethod, "Forecast integration disabled");
 		}
 
-		console.log(`DEBUG: LocalWeatherProvider.getForecastData - Getting ${days} day forecast from OpenMeteo for coordinates:`, coordinates);
+		debugLog(`DEBUG: LocalWeatherProvider.getForecastData - Getting ${days} day forecast from OpenMeteo for coordinates:`, coordinates);
 		
 		try {
 			// Use OpenMeteo for detailed forecast with all ETo parameters
@@ -358,10 +358,10 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 				`temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&` +
 				`forecast_days=${days}&timeformat=unixtime`;
 
-			console.log("DEBUG: Forecast URL:", forecastUrl);
+			debugLog("DEBUG: Forecast URL:", forecastUrl);
 			
 			const forecastData = await httpJSONRequest(forecastUrl);
-			console.log("DEBUG: OpenMeteo forecast response keys:", Object.keys(forecastData));
+			debugLog("DEBUG: OpenMeteo forecast response keys:", Object.keys(forecastData));
 
 			if (!forecastData.daily || !forecastData.hourly) {
 				throw new Error("Missing daily or hourly data in OpenMeteo response");
@@ -398,11 +398,11 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 					estimatedFields: validHumidity.length === 0 ? ['minHumidity', 'maxHumidity'] : [] // Mark if we used fallback values
 				};
 				
-				console.log(`DEBUG: Forecast day ${day + 1} ETo data:`, JSON.stringify(etoData));
+				debugLog(`DEBUG: Forecast day ${day + 1} ETo data:`, JSON.stringify(etoData));
 				results.push(etoData);
 			}
 			
-			console.log(`DEBUG: LocalWeatherProvider.getForecastData - Successfully retrieved ${results.length} days of forecast data`);
+			debugLog(`DEBUG: LocalWeatherProvider.getForecastData - Successfully retrieved ${results.length} days of forecast data`);
 			return results;
 			
 		} catch (err) {

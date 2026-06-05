@@ -14,11 +14,7 @@ export default class DWDWeatherProvider extends WeatherProvider {
 
 	public async getWateringData( coordinates: GeoCoordinates ): Promise< ZimmermanWateringData > {
 		const yesterdayTimestamp: string = moment().subtract( 1, "day" ).utc().format("YYYY-MM-DD");
-		//console.log("DWD getWateringData request for coordinates: %s", coordinates);
-
 		const yesterdayUrl = `https://api.brightsky.dev/weather?lat=${ coordinates[ 0 ] }&lon=${ coordinates[ 1 ] }&date=${ yesterdayTimestamp }`;
-
-		//console.log("1: %s", yesterdayUrl);
 
 		let yesterdayData;
 		try {
@@ -33,8 +29,6 @@ export default class DWDWeatherProvider extends WeatherProvider {
 		}
 
 		const samples = yesterdayData.weather;
-
-		//console.log("2: %s", samples.len);
 
 		// Fail if not enough data is available.
 		// There will only be 23 samples on the day that daylight saving time begins.
@@ -74,9 +68,6 @@ export default class DWDWeatherProvider extends WeatherProvider {
 	}
 
 	public async getWeatherData( coordinates: GeoCoordinates ): Promise< WeatherData > {
-
-		//console.log("DWD getWeatherData request for coordinates: %s", coordinates);
-
 		const currentDate: string = moment().format("YYYY-MM-DD");
 
 		const currentUrl = `https://api.brightsky.dev/current_weather?lat=${ coordinates[ 0 ] }&lon=${ coordinates[ 1 ] }`;
@@ -155,7 +146,6 @@ export default class DWDWeatherProvider extends WeatherProvider {
 			} );
 		}
 
-		//console.log("DWD getWeatherData result: %s", weather);
 		console.log("DWD 2: temp:%s humidity:%s wind:%s desc:%s city:%s",
 			current.weather.temperature,
 			current.weather.relative_humidity,
@@ -173,7 +163,6 @@ export default class DWDWeatherProvider extends WeatherProvider {
 		//const DARKSKY_API_KEY = process.env.DARKSKY_API_KEY,
 		//	historicUrl = `https://api.darksky.net/forecast/${DARKSKY_API_KEY}/${coordinates[0]},${coordinates[1]},${timestamp}`;
 
-		//console.log("DWD getEToData request for coordinates: %s", coordinates);
 		const timestamp: string = moment().subtract( 1, "day" ).utc().format("YYYY-MM-DD");
 		const historicUrl = `https://api.brightsky.dev/weather?lat=${ coordinates[ 0 ] }&lon=${ coordinates[ 1 ] }&date=${ timestamp }`;
 
@@ -195,7 +184,6 @@ export default class DWDWeatherProvider extends WeatherProvider {
 				endTime: moment( hour.timestamp ).add( 1, "hours" ),
 				cloudCover: hour.cloud_cover / 100.0,
 			};
-			//console.log("CloudCoverInfo: %s", result);
 			return result;
 		} );
 

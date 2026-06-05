@@ -31,8 +31,6 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 		if ( !locationData || !locationData.Key ) {
 			throw new CodedError( ErrorCode.NoLocationFound );
 		}
-		//console.log("Location key:" + locationData.Key);
-
 		const yesterdayUrl = `https://dataservice.accuweather.com/currentconditions/v1/${ locationData.Key }/historical/24?apikey=${ localKey }&details=true`;
 
 		let yesterdayData;
@@ -86,8 +84,6 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 		} catch ( err ) {
 			console.error( "Error retrieving location information from AccuWeather:", err );
 		}
-		//console.log("Location key:" + locationData.Key);
-
 		const currentUrl = `https://dataservice.accuweather.com/currentconditions/v1/${ locationData.Key }?apikey=${ localKey }&details=true`;
 		const forecastUrl = `https://dataservice.accuweather.com/forecasts/v1/daily/5day/${ locationData.Key }?apikey=${ localKey }&details=true`;
 
