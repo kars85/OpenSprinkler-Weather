@@ -128,6 +128,10 @@ export default class AppleWeatherProvider extends WeatherProvider {
 
 		const currentWeather = forecast.currentWeather;
 		const dailyForecasts = forecast.forecastDaily.days as any[];
+		const dailyPrecipMm = dailyForecasts[0].precipitationAmount;
+		const precip = dailyPrecipMm !== undefined
+			? this.mmToInchesPerHour(dailyPrecipMm)
+			: this.mmToInchesPerHour(currentWeather.precipitationIntensity || 0) * 24;
 
 		const weather: WeatherData = {
 			weatherProvider: "Apple",
@@ -140,7 +144,7 @@ export default class AppleWeatherProvider extends WeatherProvider {
 			city: "",
 			minTemp: Math.floor(this.celsiusToFahrenheit(dailyForecasts[0].temperatureMin)),
 			maxTemp: Math.floor(this.celsiusToFahrenheit(dailyForecasts[0].temperatureMax)),
-			precip: this.mmToInchesPerHour(currentWeather.precipitationIntensity || 0) * 24, // Daily total from current intensity? This might be inaccurate. Consider daily summary.
+			precip,
 			forecast: []
 		};
 
