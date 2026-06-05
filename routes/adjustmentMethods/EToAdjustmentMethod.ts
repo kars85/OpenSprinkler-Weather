@@ -699,7 +699,8 @@ export function calculateETo( etoData: EToData, elevation: number, coordinates: 
 
    const latitudeRads = Math.PI / 180 * coordinates[ 0 ];
 
-   const sunsetHourAngle = Math.acos( -Math.tan( latitudeRads ) * Math.tan( solarDeclination ) );
+   const sunsetHourAngleArgument = -Math.tan( latitudeRads ) * Math.tan( solarDeclination );
+   const sunsetHourAngle = Math.acos( Math.max( -1, Math.min( 1, sunsetHourAngleArgument ) ) );
 
    const extraterrestrialRadiation = 24 * 60 / Math.PI * 0.082 * inverseRelativeEarthSunDistance * ( sunsetHourAngle * Math.sin( latitudeRads ) * Math.sin( solarDeclination ) + Math.cos( latitudeRads ) * Math.cos( solarDeclination ) * Math.sin( sunsetHourAngle ) );
 
@@ -707,7 +708,8 @@ export function calculateETo( etoData: EToData, elevation: number, coordinates: 
 
    const netShortWaveRadiation = ( 1 - 0.23 ) * solarRadiation;
 
-   const netOutgoingLongWaveRadiation = 4.903e-9 * ( Math.pow( maxTemp + 273.16, 4 ) + Math.pow( minTemp + 273.16, 4 ) ) / 2 * ( 0.34 - 0.14 * Math.sqrt( actualVaporPressure ) ) * ( 1.35 * solarRadiation / clearSkyRadiation - 0.35);
+   const clearSkyRadiationRatio = Number.isFinite( clearSkyRadiation ) && clearSkyRadiation > 0 ? solarRadiation / clearSkyRadiation : 0;
+   const netOutgoingLongWaveRadiation = 4.903e-9 * ( Math.pow( maxTemp + 273.16, 4 ) + Math.pow( minTemp + 273.16, 4 ) ) / 2 * ( 0.34 - 0.14 * Math.sqrt( actualVaporPressure ) ) * ( 1.35 * clearSkyRadiationRatio - 0.35);
 
    const netRadiation = netShortWaveRadiation - netOutgoingLongWaveRadiation;
 
