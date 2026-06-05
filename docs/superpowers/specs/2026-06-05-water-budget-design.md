@@ -111,7 +111,7 @@ Each computation appends one `DecisionRecord` (the entire "insight" payload for 
 A future dashboard (separate cycle) reads this array; deferring the UI costs nothing because the data is captured from day one.
 
 The method adds **one additive field** to `rawData`: `reason` — a short human-readable string, e.g.:
-> `"Scale 45%: soil still moist from 1.1\" rain 2 days ago (deficit 0.09\" of 0.20\" normal) for Amherst, MA"`
+> `"Scale 0%: ~0.6\" of stored rain still covers demand."` or `"Scale 100%: dry conditions; watering at 100% of normal."`
 
 `rawData` is already a free-form object in the response, so this is **wire-compatible**: firmware that ignores it is unaffected; the OpenSprinkler app that wants it gets the explanation.
 
@@ -131,32 +131,42 @@ Documentation will state that `loc` accepts ZIP / place / GPS / **street address
 
 ## Configuration
 
-Per-request via `wto` options with env-var defaults (same pattern as Zimmerman/ETo):
+**Environment-only in v1.** Per-request `kc`/`mx` overrides were considered but dropped: state advances once per calendar day and same-day re-polls are idempotent, so a same-day override could not take effect and would mislead. Per-request tuning is a future enhancement. (Site `elevation` may still be passed per request, as today.)
 
-| Setting | env default | `wto` override |
+| Setting | env var | default |
 |---|---|---|
-| crop coefficient | `BUDGET_KC` (≈ 0.9) | `kc` |
-| max scale | `BUDGET_MAX_SCALE` (200) | `mx` |
-| runoff factor | `BUDGET_RUNOFF` (1.0) | — |
-| gap-reset days | `BUDGET_GAP_RESET` (2) | — |
-| state file path | `BUDGET_STATE_FILE` | — |
-| geocoder (existing) | `GEOCODER` (WUnderground) | — |
+| crop coefficient | `BUDGET_KC` | 0.9 |
+| max scale | `BUDGET_MAX_SCALE` | 200 |
+| runoff factor | `BUDGET_RUNOFF` | 1.0 |
+| rain-bank cap (days) | `BUDGET_RAINBANK_CAP_DAYS` | 14 |
+| gap-reset days | `BUDGET_GAP_RESET` | 2 |
+| site elevation (ft) | `BUDGET_ELEVATION` | 600 |
+| fallback reference ETo (in/day) | `BUDGET_DEFAULT_REF_ETO` | 0.15 |
+| state file path | `BUDGET_STATE_FILE` | `waterBudgetState.json` (git-ignored) |
+| geocoder (existing) | `GEOCODER` | `WUnderground` |
 
 ## Error Handling — fail open, never corrupt state, never crash watering
 
-- **Transient weather failure** (provider down / missing fields): do not touch `deficit`; return the last stored `scale` with a `reason` flagged `(stale: weather unavailable)`. If there is no stored state yet, fall back to the chosen base method's existing coded error.
-- **State-store read/write failure:** compute as a cold start (`deficit = referenceETc` → neutral 100%), log a WARN, continue. A disk hiccup must never block irrigation.
-- **Corrupt state file:** recover by treating that key as cold-start (do not throw); atomic writes should prevent partial files, but defend anyway.
+- **Negative / missing ETo:** `calculateETo` has no lower bound and can return a small negative value; the model clamps `ETc` (and `referenceETc`) to `≥ 0` so a negative ETo can never inflate the rain bank (fake memory).
+- **Transient weather failure** (provider down / fields missing): do not touch `rainBank`; return the last stored `scale` with a `reason` flagged `(stale: weather unavailable)`. If there is no stored state yet, propagate a coded error (today's behavior).
+- **State-store read/write failure:** treat as a cold start (`rainBank = 0`), log a WARN, continue. A disk hiccup must never block irrigation.
+- **Baseline ETo unavailable** (data file absent / out of bounds): fall back to `BUDGET_DEFAULT_REF_ETO` as the normalizer.
+- **Corrupt state file:** recover by starting empty (do not throw); atomic writes should prevent partial files, but defend anyway.
 - **Geocode failure:** unchanged (existing coded error).
 - All errors funnel through the existing `CodedError` / `makeCodedError` path so no secrets leak (consistent with prior redaction work).
+
+## Response-format compatibility (must-fix)
+
+`convertToLegacyFormat()` in `weather.ts` reduces `rawData` to `{ wp }` for any method except ETo/Zimmerman, and runs by default (`SIMPLIFIED_RESPONSE_FORMAT`). The implementation **must add a WaterBudget branch** that preserves `reason`/`bank`/`eto`/`etc`/`p`, and a **route-level test** (through `getWateringData`, not just the method) must assert the `reason` survives — the direct-method unit tests do not exercise this path. The per-method watering-scale cache is compatible (it is keyed by method id and serves the stored `rawData`, advancing state once per day).
 
 ## Testing
 
 - **`SoilMoistureModel.step` — pure unit tests, no mocks** (primary confidence):
-  - rain memory (a 1″ rain drops scale, recovers to ~100% over N days), dry-spell pin at 100%, heat-wave ramp > 100%, cold start = 100%, gap > threshold resets, same-day idempotency, clamping bounds.
-- **`FileStateStore`:** load/save round-trip, atomic-write behavior, bounded-history eviction, corrupt-file → cold-start recovery.
-- **End-to-end** (following the existing OWM regression-test pattern with a mocked provider): drive `WaterBudgetAdjustmentMethod` over a multi-day weather sequence and assert the scale *trajectory*, the `reason`, and the persisted `deficit`.
-- **Determinism / wire-format:** fixed inputs → fixed outputs (TZ-pinned, matching the determinism fix already in the suite); assert the legacy response still parses and `rawData.reason` is additive-only.
+  - rain memory (rain drops scale, drains over N days), dry-spell ≈ 100%, heat-wave ramp > 100%, cold start ≈ 100%, gap > threshold resets, same-day idempotency, rain-bank cap, **negative ETo never inflates the bank**, clamping bounds.
+- **`FileStateStore`:** load/save round-trip, atomic-write behavior, corrupt-file → empty recovery, persistence across instances.
+- **Method behavior** (mock provider): rain ⇒ 0%, persistence across calls, idempotency, stale-hold on weather failure, coded error when weather fails with no prior state.
+- **Route-level (must-have):** through `getWateringData` with adjustment method `4`, assert the response carries a numeric `scale` and a `rawData.reason` (proving `convertToLegacyFormat` preserves it and the cache path integrates).
+- **Determinism / wire-format:** fixed inputs → fixed outputs (TZ-pinned, matching the determinism fix already in the suite); the legacy response still parses and `rawData.reason`/`bank` are additive-only.
 
 ## Out of Scope (future cycles)
 

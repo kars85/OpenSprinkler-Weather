@@ -20,11 +20,15 @@
 | `routes/state/StateStore.ts` | `StateStore` interface + `FileStateStore` (in-memory + atomic flush + corrupt-recovery). | Create |
 | `routes/adjustmentMethods/WaterBudgetAdjustmentMethod.ts` | The method: fetch ET/rain, resolve config, run model, persist, build `reason`. | Create |
 | `routes/baselineETo.ts` | Export `getBaselineDailyETo(coordinates)` (currently the private `calculateAverageDailyETo`). | Modify |
-| `routes/weather.ts` | Register `4: WaterBudgetAdjustmentMethod` in `ADJUSTMENT_METHOD`; export the map for testing. | Modify |
+| `routes/weather.ts` | Register `4: WaterBudgetAdjustmentMethod`; export `ADJUSTMENT_METHOD`; add a WaterBudget branch to `convertToLegacyFormat`. | Modify |
 | `routes/adjustmentMethods/SoilMoistureModel.spec.ts` | Pure-model unit tests (the bulk of confidence). | Create |
 | `routes/state/FileStateStore.spec.ts` | Store round-trip / atomic / corrupt-recovery tests. | Create |
 | `routes/adjustmentMethods/WaterBudgetAdjustmentMethod.spec.ts` | Behavioral integration tests with a mock provider. | Create |
-| `docs/water-budget.md` | User docs: how to enable, config, address input. | Create |
+| `routes/weather.spec.ts` | Route-level method-4 test (legacy-format preservation + cache path). | Modify |
+| `test/replies.json` | Extend OWM `current` fixture (`clouds`, `wind_speed`) for `getEToData`. | Modify |
+| `test/setup-env.ts` | Point `BUDGET_STATE_FILE` at a throwaway temp file for tests. | Modify |
+| `.gitignore` | Exclude the default `waterBudgetState.json` runtime file. | Modify |
+| `docs/water-budget.md` | User docs: enable, config, state-file hygiene, address input. | Create |
 
 **Test commands:** single test by name → `npm test -- --grep "<name>"`; full suite → `npm test`; type-check → `npm run compile`. The repo's `.mocharc.json` already wires `ts-node/register`, `test/setup-env.ts`, and `TZ=UTC`.
 
@@ -165,6 +169,17 @@ describe( "SoilMoistureModel", () => {
 		expect( step( undefined, input({ eto: -5 }) ).scale ).to.equal( 0 );
 		expect( step( undefined, input({ eto: 999 }) ).scale ).to.equal( 200 );
 	} );
+
+	it( "treats negative ETo as zero demand and never inflates the rain bank", () => {
+		// A negative ETo must not create fake rain memory.
+		const d1 = step( undefined, input({ today: "2019-05-13", eto: -0.5, precip: 0 }) );
+		expect( d1.scale ).to.equal( 0 );
+		expect( d1.state.rainBank ).to.equal( 0 );
+		// Even starting from a real bank, a negative-ETo day must not grow it.
+		const seeded = step( undefined, input({ today: "2019-05-13", precip: 0.40 }) ).state; // bank 0.20
+		const d2 = step( seeded, input({ today: "2019-05-14", eto: -0.5, precip: 0 }) );
+		expect( d2.state.rainBank ).to.be.at.most( seeded.rainBank );
+	} );
 } );
 ```
 
@@ -261,8 +276,10 @@ function buildReason( p: {
  */
 export function step( prev: BudgetState | undefined, input: StepInput ): StepResult {
 	const { today, eto, precip, referenceEto, resolvedLocation, params } = input;
-	const etc = eto * params.kc;
-	const referenceEtc = referenceEto * params.kc;
+	// Clamp ET to >= 0: calculateETo has no lower bound and can return a small
+	// negative value, which would otherwise INFLATE the rain bank (fake memory).
+	const etc = Math.max( 0, eto ) * params.kc;
+	const referenceEtc = Math.max( 0, referenceEto ) * params.kc;
 	const effectiveRain = Math.max( 0, precip ) * params.runoffFactor;
 
 	// Same-day re-poll: return the stored result unchanged (idempotent).
@@ -603,11 +620,14 @@ function optNum( value: any, fallback: number ): number {
 	return Number.isFinite( v ) && v > 0 ? v : fallback;
 }
 
-function resolveParams( opts: AdjustmentOptions ): BudgetParams {
-	const o = opts as any;
+// Config is ENV-ONLY in v1. Per-request kc/mx overrides were considered but
+// dropped: state advances once per calendar day (same-day re-polls are idempotent),
+// so a same-day kc/mx change could not take effect and would mislead. Per-request
+// tuning is a deliberate future enhancement.
+function resolveParams(): BudgetParams {
 	return {
-		kc: optNum( o.kc, envNum( "BUDGET_KC", 0.9 ) ),
-		maxScale: optNum( o.mx, envNum( "BUDGET_MAX_SCALE", 200 ) ),
+		kc: envNum( "BUDGET_KC", 0.9 ),
+		maxScale: envNum( "BUDGET_MAX_SCALE", 200 ),
 		runoffFactor: envNum( "BUDGET_RUNOFF", 1.0 ),
 		rainBankCapDays: envNum( "BUDGET_RAINBANK_CAP_DAYS", 14 ),
 		gapResetDays: envNum( "BUDGET_GAP_RESET", 2 )
@@ -644,7 +664,7 @@ async function calculateWaterBudgetScale(
 	weatherProvider: WeatherProvider,
 	pws?: PWS
 ): Promise< AdjustmentMethodResponse > {
-	const params = resolveParams( adjustmentOptions );
+	const params = resolveParams();
 	const elevation = optNum( ( adjustmentOptions as EToScalingAdjustmentOptions ).elevation, envNum( "BUDGET_ELEVATION", 600 ) );
 	const key = stateKey( coordinates );
 
@@ -782,11 +802,94 @@ git commit -m "feat(water-budget): register WaterBudget as adjustment method 4 [
 
 ---
 
-## Task 6: User documentation
+## Task 6: Preserve WaterBudget fields in the legacy response + route-level test
+
+`convertToLegacyFormat()` in `weather.ts` only copies detailed `rawData` for ETo and Zimmerman; every other method is reduced to `{ wp }`. Because `SIMPLIFIED_RESPONSE_FORMAT` defaults on, method 4's `reason`/`bank`/`eto` would be stripped from the response. Add a WaterBudget branch and prove the whole thing end-to-end through `getWateringData` (which also exercises the per-method watering-scale cache path — confirming integration finding #5). This test is the one that would have caught the stripping bug, which the direct-method unit tests miss.
+
+**Files:**
+- Modify: `routes/weather.ts` (`convertToLegacyFormat`, the method-specific `rawData` branches)
+- Modify: `test/replies.json` (extend the OWM `current` fixture so `getEToData` has `clouds` + `wind_speed`)
+- Test: `routes/weather.spec.ts` (route-level method-4 assertion)
+
+- [ ] **Step 1: Extend the OWM fixture for `getEToData`.** Method 4 calls `weatherProvider.getEToData`, which (for OWM) reads `current.clouds` and `current.wind_speed` — fields the existing `OWMToday` fixture lacks. Add them (additive; does not affect the existing Zimmerman test):
+
+```bash
+node -e "const fs=require('fs');const p='./test/replies.json';const r=JSON.parse(fs.readFileSync(p,'utf8'));r['01002'].OWMToday.current.clouds=20;r['01002'].OWMToday.current.wind_speed=5;fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n');console.log('extended OWMToday.current with clouds + wind_speed');"
+```
+
+- [ ] **Step 2: Write the failing route test.** Append this `it` inside the existing `describe('Watering Data', ...)` block in `routes/weather.spec.ts` (it reuses the existing `mockGeocoder`, `mockOWMWatering`, and `createExpressMocks` helpers):
+
+```typescript
+    it('Water Budget Lookup (Adjustment Method 4, Location 01002)', async () => {
+        mockGeocoder();
+        mockOWMWatering();
+
+        const expressMocks = createExpressMocks(4, location, '"provider":"OWM"');
+        await getWateringData(expressMocks.request, expressMocks.response);
+
+        const body: any = expressMocks.response._getJSON();
+        expect( body.scale ).to.be.a('number');
+        expect( body.scale ).to.be.within(0, 200);
+        // The additive reason must survive convertToLegacyFormat (SIMPLIFIED_RESPONSE_FORMAT is on).
+        expect( body.rawData ).to.be.an('object');
+        expect( body.rawData.reason ).to.be.a('string').and.contain('Scale');
+    });
+```
+
+- [ ] **Step 3: Run the test to verify it fails.**
+
+Run: `npm test -- --grep "Water Budget Lookup"`
+Expected: FAIL — `body.rawData.reason` is `undefined` because `convertToLegacyFormat` reduced method-4 `rawData` to `{ wp }`.
+
+- [ ] **Step 4: Add the WaterBudget branch to `convertToLegacyFormat`.** In `routes/weather.ts`, find the method-specific block inside `convertToLegacyFormat` and add a `WaterBudgetAdjustmentMethod` branch after the Zimmerman one (the `WaterBudgetAdjustmentMethod` import was added in Task 5):
+
+```typescript
+			} else if (adjustmentMethod === ZimmermanAdjustmentMethod) {
+				Object.assign(legacyData.rawData, {
+					h: rawDataSource.h, p: rawDataSource.p, t: rawDataSource.t, raining: rawDataSource.raining
+				});
+			} else if (adjustmentMethod === WaterBudgetAdjustmentMethod) {
+				Object.assign(legacyData.rawData, {
+					eto: rawDataSource.eto, etc: rawDataSource.etc, p: rawDataSource.p,
+					bank: rawDataSource.bank, reason: rawDataSource.reason
+				});
+			}
+```
+
+- [ ] **Step 5: Run the test to verify it passes; run the full suite.**
+
+Run: `npm test -- --grep "Water Budget Lookup"`
+Expected: PASS.
+Run: `npm test`
+Expected: PASS — all existing + new tests, 0 failing.
+
+- [ ] **Step 6: Commit.**
+
+```bash
+git add routes/weather.ts test/replies.json routes/weather.spec.ts
+git commit -m "feat(water-budget): preserve reason/bank in legacy response + route-level test [#water-budget]"
+```
+
+---
+
+## Task 7: User documentation, state-file hygiene & ops
 
 **Files:**
 - Create: `docs/water-budget.md`
 - Modify: `README.md` (add a link under the methods/features list)
+- Modify: `.gitignore` (exclude the default state file)
+
+- [ ] **Step 0: Stop the runtime state file from being committed.** The default `BUDGET_STATE_FILE` (`waterBudgetState.json`) is runtime data, like `geocoderCache.json`. Add it to `.gitignore` under the existing "Runtime/cache data" section:
+
+```gitignore
+# Runtime/cache data generated by running service
+geocoderCache.json
+observations.json
+waterBudgetState.json
+```
+
+Run: `npm run compile && git check-ignore waterBudgetState.json`
+Expected: prints `waterBudgetState.json` (confirming it is ignored).
 
 - [ ] **Step 1: Write the docs.** Create `docs/water-budget.md`:
 
@@ -823,8 +926,18 @@ installations.
 | `BUDGET_DEFAULT_REF_ETO` | 0.15 | Fallback normal daily ET (in) if baseline data is unavailable. |
 | `BUDGET_STATE_FILE` | `waterBudgetState.json` | Path to the state file. |
 
-`kc` and the max scale can also be overridden per request via the `wto` option
-keys `kc` and `mx`.
+Configuration is environment-only in this version; changes apply on the next
+service restart (the budget advances once per day, so per-request tuning is not
+supported yet).
+
+## State persistence
+
+This method keeps a small per-location state file (rain bank + recent history).
+By default it is written to `waterBudgetState.json` next to the service. In a
+container or read-only deployment, set `BUDGET_STATE_FILE` to a path on a mounted,
+writable volume so the state survives restarts and redeploys (the file is
+git-ignored and must not be baked into the image). If the file is lost, the
+budget simply restarts from a neutral state.
 
 ## Location / address input
 
@@ -842,22 +955,23 @@ names.
 
 - [ ] **Step 2: Verify the docs render (no broken table / link).**
 
-Run: `git add docs/water-budget.md README.md && git status --short`
-Expected: both files staged; visually confirm the table and link look correct.
+Run: `git add docs/water-budget.md README.md .gitignore && git status --short`
+Expected: all three files staged; visually confirm the table and link look correct.
 
 - [ ] **Step 3: Commit.**
 
 ```bash
-git commit -m "docs(water-budget): user guide for adjustment method 4 [#water-budget]"
+git commit -m "docs(water-budget): user guide, state-file hygiene, and gitignore [#water-budget]"
 ```
 
 ---
 
 ## Done criteria
 
-- `npm test` is green (existing 6 + new SoilMoistureModel / FileStateStore / WaterBudget tests), `npm run compile` clean.
-- Selecting adjustment method `4` returns a `scale` and a `rawData.reason`; rain on a prior day suppresses today's scale; the legacy response still parses (only an additive `reason`/`bank` were added to `rawData`).
-- State persists to `BUDGET_STATE_FILE` and is bounded (≤ 90 history records/location).
+- `npm test` is green (existing 6 + new SoilMoistureModel / FileStateStore / WaterBudget unit tests + the route-level method-4 test), `npm run compile` clean.
+- Selecting adjustment method `4` **through the route** returns a `scale` and a `rawData.reason` that survives `convertToLegacyFormat` (the additive `reason`/`bank`/`eto` are preserved; the legacy response still parses).
+- Rain on a prior day suppresses today's scale; a negative ETo never inflates the rain bank; steady-state dry ≈ 100%.
+- State persists to `BUDGET_STATE_FILE`, is bounded (≤ 90 history records/location), and `waterBudgetState.json` is git-ignored (never committed or baked into the image).
 
 ## Out of scope (future cycles, per spec)
 - Dashboard/trends UI over the decision log.
