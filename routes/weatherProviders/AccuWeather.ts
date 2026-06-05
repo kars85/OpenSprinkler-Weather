@@ -29,7 +29,7 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 		}
 		//console.log("Location key:" + locationData.Key);
 
-		const yesterdayUrl = `http://dataservice.accuweather.com/currentconditions/v1/${ locationData.Key }/historical/24?apikey=${ localKey }&details=true`;
+		const yesterdayUrl = `https://dataservice.accuweather.com/currentconditions/v1/${ locationData.Key }/historical/24?apikey=${ localKey }&details=true`;
 
 		let yesterdayData;
 		try {
@@ -148,7 +148,7 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 		const timestamp: number = moment().subtract( 1, "day" ).unix();
 
 		const ACCUWEATHER_API_KEY = process.env.ACCUWEATHER_API_KEY,
-			historicUrl = `http://dataservice.accuweather.com/currentconditions/v1/${ locationData.Key }/historical/24?apikey=${ localKey }&details=true`;
+			historicUrl = `https://dataservice.accuweather.com/currentconditions/v1/${ locationData.Key }/historical/24?apikey=${ localKey }&details=true`;
 
 		let historicData;
 		try {
