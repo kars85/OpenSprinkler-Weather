@@ -17,6 +17,7 @@ import EToAdjustmentMethod from "./adjustmentMethods/EToAdjustmentMethod";
 import WaterBudgetAdjustmentMethod from "./adjustmentMethods/WaterBudgetAdjustmentMethod";
 import { CodedError, ErrorCode, makeCodedError } from "../errors";
 import { Geocoder } from "./geocoders/Geocoder";
+import { applyWeatherSkips } from "./skips/SkipGuard";
 
 const WEATHER_PROVIDERS: { [method: string] : WeatherProvider} = {
 	"AW": new ( require("./weatherProviders/AccuWeather" ).default )(),
@@ -100,7 +101,7 @@ function isLegacyFirmwareRequest(req: express.Request): boolean {
 	return isLegacy;
 }
 
-function convertToLegacyFormat(enhancedData: any, adjustmentMethod: AdjustmentMethod): any {
+export function convertToLegacyFormat(enhancedData: any, adjustmentMethod: AdjustmentMethod): any {
 	if (!SIMPLIFIED_RESPONSE_FORMAT) {
 		debugLog("DEBUG convertToLegacyFormat: SIMPLIFIED_RESPONSE_FORMAT is false, returning enhancedData.");
 		return enhancedData;
@@ -134,6 +135,13 @@ function convertToLegacyFormat(enhancedData: any, adjustmentMethod: AdjustmentMe
 				eto: rawDataSource.eto, etc: rawDataSource.etc, p: rawDataSource.p,
 				bank: rawDataSource.bank, reason: rawDataSource.reason
 			});
+		}
+		// Universal passthrough for cross-cutting weather-skip metadata (applies to ALL methods).
+		if ( rawDataSource.skip ) {
+			legacyData.rawData.skip = rawDataSource.skip;
+			if ( rawDataSource.skipReason !== undefined ) {
+				legacyData.rawData.skipReason = rawDataSource.skipReason;
+			}
 		}
 	} else {
 		debugLog("DEBUG convertToLegacyFormat: enhancedData.rawData is missing.");
@@ -404,6 +412,11 @@ export const getWateringData = async function( req: express.Request, res: expres
 			cache.storeWateringScale( adjustmentParam, coordinates, pws, adjustmentOptions, cacheEntry );
 		}
 	}
+
+	// Live, additive weather-skip overlay. Runs on every request (cache hit or miss), after the
+	// method + restriction have resolved the scale. Returns a fresh object (never mutates the
+	// cached result) and only sets scale=0 / skip metadata when a skip actually fires.
+	dataToSend = await applyWeatherSkips( dataToSend, weatherProvider, coordinates, pws, adjustmentOptions );
 	
     debugLog(`DEBUG getWateringData: Data before legacy conversion (dataToSend): ${JSON.stringify(dataToSend)}`);
 	let responseData = dataToSend;

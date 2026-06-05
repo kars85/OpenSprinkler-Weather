@@ -62,6 +62,7 @@ For more information on the "WeeWX Solution" click [here](docs/weewx.md)
 - Netatmo: instructions for configuring this PWS have been greatfully provided by @franzstein [here](docs/netatmo.md)
 
 - For multi-day, rain-aware **Water-Budget** watering (adjustment method 4), see [here](docs/water-budget.md)
+- For optional **freeze / wind / rain skips** (force watering to 0% in bad conditions), see [here](docs/weather-skips.md)
 
 ## Docker
 

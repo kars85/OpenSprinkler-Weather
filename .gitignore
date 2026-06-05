@@ -45,3 +45,4 @@ js/
 .abc-audit-hash
 .empirica_reflex_logs/
 .claude-octopus/
+.breadcrumbs.yaml

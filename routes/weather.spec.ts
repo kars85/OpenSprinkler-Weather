@@ -8,15 +8,28 @@ import * as MockDate from 'mockdate';
 process.env.WEATHER_PROVIDER = "OWM";
 process.env.OWM_API_KEY = "NO_KEY";
 
-import { getWateringData } from './weather';
+import { convertToLegacyFormat, getWateringData } from './weather';
 import { GeoCoordinates, WeatherData, ZimmermanWateringData } from "../types";
 import { WeatherProvider } from "./weatherProviders/WeatherProvider";
 import { EToData } from "./adjustmentMethods/EToAdjustmentMethod";
+import ManualAdjustmentMethod from './adjustmentMethods/ManualAdjustmentMethod';
 
 const expected = require( '../test/expected.json' );
 const replies = require( '../test/replies.json' );
 
 const location = '01002';
+
+describe( 'convertToLegacyFormat skip passthrough', () => {
+	it( 'preserves skip / skipReason for any method', () => {
+		const enhanced = {
+			scale: 0, rd: undefined, tz: 32, sunrise: 100, sunset: 200, eip: 1, errCode: 0,
+			rawData: { wp: 'OWM', skip: 1, skipReason: 'freeze: 28F at or below 32F' }
+		};
+		const out: any = convertToLegacyFormat( enhanced, ManualAdjustmentMethod );
+		expect( out.rawData.skip ).to.equal( 1 );
+		expect( out.rawData.skipReason ).to.equal( 'freeze: 28F at or below 32F' );
+	} );
+} );
 
 describe('Watering Data', () => {
     beforeEach(() => MockDate.set('5/13/2019'));
@@ -65,6 +78,30 @@ describe('Watering Data', () => {
         await getWateringData(expressMocksB.request, expressMocksB.response);
 
         expect( expressMocksB.response._getJSON() ).to.eql( expressMocksA.response._getJSON() );
+    });
+
+    it('applies a freeze skip as a live overlay (scale 0 + skipReason survives legacy)', async () => {
+        const saved = process.env.SKIP_FREEZE;
+        process.env.SKIP_FREEZE = 'on';
+        mockGeocoder();
+        mockOWMWatering(); // serves getWateringData's day_summary + onecall (Zimmerman path)
+        // The skip overlay then calls OWM.getWeatherData -> a SECOND onecall; return a freezing day.
+        nock('https://api.openweathermap.org')
+            .get('/data/3.0/onecall').query(true)
+            .reply(200, {
+                current: { temp: 30, humidity: 90, wind_speed: 3, weather: [ { id: 600, main: 'Snow', description: 'snow', icon: '13d' } ] },
+                daily: [ { dt: 1557705600, temp: { min: 28, max: 34 }, rain: 0, weather: [ { id: 600, main: 'Snow', description: 'snow', icon: '13d' } ] } ]
+            });
+        try {
+            const expressMocks = createExpressMocks(1, location, '"provider":"OWM"');
+            await getWateringData(expressMocks.request, expressMocks.response);
+            const body: any = expressMocks.response._getJSON();
+            expect( body.scale ).to.equal( 0 );
+            expect( body.rawData.skip ).to.equal( 1 );
+            expect( body.rawData.skipReason ).to.be.a('string').and.contain('freeze');
+        } finally {
+            if ( saved === undefined ) { delete process.env.SKIP_FREEZE; } else { process.env.SKIP_FREEZE = saved; }
+        }
     });
 });
 
