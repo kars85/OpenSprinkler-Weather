@@ -2,7 +2,7 @@ import * as moment from "moment-timezone";
 
 import { GeoCoordinates, PWS, WeatherData, ZimmermanWateringData } from "../../types";
 import { WeatherProvider } from "./WeatherProvider";
-import { httpJSONRequest } from "../weather";
+import { httpJSONRequest, redactLogString } from "../weather";
 import { approximateSolarRadiation, CloudCoverInfo, EToData } from "../adjustmentMethods/EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
 
@@ -128,8 +128,8 @@ export default class WUnderground extends WeatherProvider {
 		const historicUrl1 = `https://api.weather.com/v2/pws/history/all?stationId=${ pws.id }&format=json&units=e&date=${ fromDateStr }&numericPrecision=decimal&apiKey=${ pws.apiKey }`;
 		//const historicUrl2 = `https://api.weather.com/v2/pws/history/all?stationId=${ pws.id }&format=json&units=e&date=${ toDateStr }&numericPrecision=decimal&apiKey=${ pws.apiKey }`;
 		const historicUrl2 = `https://api.weather.com/v2/pws/observations/all/1day?stationId=${ pws.id }&format=json&units=e&numericPrecision=decimal&apiKey=${ pws.apiKey }`;
-		console.log(historicUrl1);
-		console.log(historicUrl2);
+		console.log(redactLogString(historicUrl1));
+		console.log(redactLogString(historicUrl2));
 
 		let historicData1, historicData2;
 		try {

@@ -51,6 +51,36 @@ const SIMPLIFIED_RESPONSE_FORMAT = process.env.SIMPLIFIED_RESPONSE_FORMAT !== 'f
 
 console.log(`DEBUG: Backward compatibility - Legacy support: ${LEGACY_FIRMWARE_SUPPORT}, Simplified format: ${SIMPLIFIED_RESPONSE_FORMAT}`);
 
+export function redactLogString( value: string ): string {
+	return value
+		.replace( /(https?:\/\/[^\s'")?]+)\?[^\s'")]+/g, "$1" )
+		.replace( /((?:^|[,{]\s*)["']?(?:key|apiKey|apikey)["']?\s*:\s*["']?)([^"',}\]]*)(["']?)/gi, "$1[REDACTED]$3" )
+		.replace( /((?:^|[,{]\s*)["']?wto["']?\s*:\s*["']?)([^"',}\]]*)(["']?)/gi, "$1[REDACTED]$3" )
+		.replace( /(\b(?:key|apiKey|apikey|wto)=)[^&\s'")]+/gi, "$1[REDACTED]" );
+}
+
+export function redactLogValue( value: any ): any {
+	if ( typeof value === "string" ) return redactLogString( value );
+	if ( value instanceof Error ) {
+		const redactedError = new Error( redactLogString( value.message ) );
+		redactedError.name = value.name;
+		redactedError.stack = value.stack ? redactLogString( value.stack ) : value.stack;
+		return redactedError;
+	}
+	if ( Array.isArray( value ) ) return value.map( redactLogValue );
+	if ( value && typeof value === "object" ) {
+		const redacted: any = {};
+		for ( const key of Object.keys( value ) ) {
+			const lowerKey = key.toLowerCase();
+			redacted[ key ] = ( lowerKey === "key" || lowerKey === "apikey" || lowerKey === "wto" )
+				? "[REDACTED]"
+				: redactLogValue( value[ key ] );
+		}
+		return redacted;
+	}
+	return value;
+}
+
 function isLegacyFirmwareRequest(req: express.Request): boolean {
 	if (!LEGACY_FIRMWARE_SUPPORT) return false;
 	const userAgent = req.headers['user-agent'] || '';
@@ -172,20 +202,20 @@ function checkWeatherRestriction( adjustmentValue: number, weather: BaseWatering
 }
 
 export const getWeatherData = async function( req: express.Request, res: express.Response ) {
-	console.log(`DEBUG getWeatherData: START - Path: ${req.path}, Query: ${JSON.stringify(req.query)}`);
+	console.log(`DEBUG getWeatherData: START - Path: ${req.path}, Query: ${JSON.stringify(redactLogValue(req.query))}`);
 	
 	const location: string = getParameter(req.query.loc);
 	let adjustmentOptionsString: string	= getParameter(req.query.wto),
 		adjustmentOptions: AdjustmentOptions;
 
-	console.log(`DEBUG getWeatherData: Raw location: "${location}", Raw adjustmentOptionsString: "${adjustmentOptionsString}"`);
+	console.log(`DEBUG getWeatherData: Raw location: "${location}", Raw adjustmentOptionsString: "${redactLogValue(adjustmentOptionsString)}"`);
 
 	try {
 		adjustmentOptionsString = decodeURIComponent( adjustmentOptionsString.replace( /\\x/g, "%" ) );
 		adjustmentOptions = JSON.parse( "{" + adjustmentOptionsString + "}" );
-		console.log(`DEBUG getWeatherData: Parsed adjustmentOptions: ${JSON.stringify(adjustmentOptions)}`);
+		console.log(`DEBUG getWeatherData: Parsed adjustmentOptions: ${JSON.stringify(redactLogValue(adjustmentOptions))}`);
 	} catch ( err ) {
-		console.error(`DEBUG getWeatherData: Failed to parse adjustmentOptions:`, err);
+		console.error(`DEBUG getWeatherData: Failed to parse adjustmentOptions:`, redactLogValue(err));
 		sendWateringError( res, new CodedError( ErrorCode.MalformedAdjustmentOptions ));
 		return;
 	}
@@ -194,8 +224,8 @@ export const getWeatherData = async function( req: express.Request, res: express
 	try {
 		coordinates = await resolveCoordinates( location );
 	} catch (err: any) {
-		console.error(`DEBUG getWeatherData: Failed to resolve coordinates:`, err);
-		res.send(`Error: Unable to resolve location (${err.message || err})`);
+		console.error(`DEBUG getWeatherData: Failed to resolve coordinates:`, redactLogValue(err));
+		res.send(`Error: Unable to resolve location (${redactLogValue(err.message || err)})`);
 		return;
 	}
 
@@ -226,8 +256,8 @@ export const getWeatherData = async function( req: express.Request, res: express
 		weatherData = await activeWeatherProvider.getWeatherData( coordinates, pws );
 		console.log(`DEBUG getWeatherData: ${activeWeatherProvider.constructor.name}.getWeatherData responded with: ${JSON.stringify(weatherData)}`);
 	} catch ( err: any ) {
-		console.error(`DEBUG getWeatherData: ${activeWeatherProvider.constructor.name}.getWeatherData failed:`, err);
-		res.send( "Error: " + (err.message || err) );
+		console.error(`DEBUG getWeatherData: ${activeWeatherProvider.constructor.name}.getWeatherData failed:`, redactLogValue(err));
+		res.send( "Error: " + redactLogValue(err.message || err) );
 		return;
 	}
 	
@@ -238,7 +268,7 @@ export const getWeatherData = async function( req: express.Request, res: express
 };
 
 export const getWateringData = async function( req: express.Request, res: express.Response ) {
-	console.log(`DEBUG getWateringData: START - Path: ${req.path}, Query: ${JSON.stringify(req.query)}, Params: ${JSON.stringify(req.params)}`);
+	console.log(`DEBUG getWateringData: START - Path: ${req.path}, Query: ${JSON.stringify(redactLogValue(req.query))}, Params: ${JSON.stringify(redactLogValue(req.params))}`);
 	const isLegacyRequest = isLegacyFirmwareRequest(req);
 	const adjustmentParam = parseInt(req.params[0], 10);
 
@@ -389,8 +419,8 @@ export const getWateringData = async function( req: express.Request, res: expres
 };
 
 function sendWateringError( res: express.Response, error: CodedError, resetScale: boolean = true, isLegacyRequest: boolean = false, useJson: boolean = false ) {
-	console.error(`DEBUG sendWateringError: Error Code: ${error.errCode}, Message: ${error.message}, ResetScale: ${resetScale}, IsLegacy: ${isLegacyRequest}, UseJSON: ${useJson}`);
-	if ( error.errCode === ErrorCode.UnexpectedError ) console.error( `An unexpected error occurred:`, error );
+	console.error(`DEBUG sendWateringError: Error Code: ${error.errCode}, Message: ${redactLogValue(error.message)}, ResetScale: ${resetScale}, IsLegacy: ${isLegacyRequest}, UseJSON: ${useJson}`);
+	if ( error.errCode === ErrorCode.UnexpectedError ) console.error( `An unexpected error occurred:`, redactLogValue(error) );
 
 	let errorData: any = { errCode: error.errCode };
     if (resetScale) errorData.scale = 100;
@@ -429,7 +459,7 @@ function sendWateringData( res: express.Response, data: object, useJson: boolean
 async function httpRequest( url: string, headers?: any, body?: any ): Promise< string > {
 	return new Promise< string >( ( resolve, reject ) => {
 		const urlMatch = url.match( filters.url );
-		if (!urlMatch) return reject(new Error(`Invalid URL format: ${url}`));
+		if (!urlMatch) return reject(new Error(`Invalid URL format: ${redactLogString(url)}`));
 		
 		const isHttps = url.startsWith("https");
 		const options: https.RequestOptions = {
@@ -447,7 +477,7 @@ async function httpRequest( url: string, headers?: any, body?: any ): Promise< s
 		const req = (isHttps ? https : http).request(options, (res) => {
 			if (res.statusCode !== 200) {
 				res.resume();
-				return reject(new Error(`Received ${res.statusCode} status code for URL '${url}'.`));
+				return reject(new Error(`Received ${res.statusCode} status code for URL '${redactLogString(url)}'.`));
 			}
 			let responseData = "";
 			res.setEncoding('utf8');
