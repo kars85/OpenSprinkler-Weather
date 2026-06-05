@@ -443,16 +443,33 @@ function sendWateringData( res: express.Response, data: object, useJson: boolean
 		for ( const key in data ) {
 			if ( !data.hasOwnProperty( key ) ) continue;
 			let value = (data as any)[ key ];
-			switch ( typeof value ) {
-				case "undefined": continue;
-				case "object": value = JSON.stringify( value ); 
-				case "string": value = String(value).replace( / /g, "+" ).replace( /\n/g, "\\n" ).replace( /&/g, "AMPERSAND" ); break;
-				default: value = String(value);
-			}
+			value = encodeLegacyWateringValue( value );
+			if ( typeof value === "undefined" ) continue;
 			formatted += `&${ key }=${ value }`;
 		}
 		console.log(`DEBUG sendWateringData: Sending QueryString response: "${formatted}"`);
 		res.send( formatted );
+	}
+}
+
+/**
+ * Encodes one value for the fixed OpenSprinkler legacy firmware wire format.
+ * The firmware decodes this custom scheme: space -> "+", newline -> "\n", and
+ * "&" -> "AMPERSAND". Do not use URLSearchParams or encodeURIComponent here;
+ * standard URL encoding changes the on-the-wire bytes and breaks legacy parsers.
+ */
+function encodeLegacyWateringValue( value: any ): string | undefined {
+	switch ( typeof value ) {
+		case "undefined":
+			return undefined;
+		case "object": {
+			const jsonValue = JSON.stringify( value );
+			return String( jsonValue ).replace( / /g, "+" ).replace( /\n/g, "\\n" ).replace( /&/g, "AMPERSAND" );
+		}
+		case "string":
+			return String( value ).replace( / /g, "+" ).replace( /\n/g, "\\n" ).replace( /&/g, "AMPERSAND" );
+		default:
+			return String( value );
 	}
 }
 
