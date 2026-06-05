@@ -34,3 +34,11 @@ Thumbs.db
 
 # Compiled JavaScript output from TypeScript
 js/
+
+# Empirica project-local state and /abc orchestrator scratch
+.empirica/
+.abc-state/
+.abc-session-create-response.json
+.abc-failures.json
+.abc-weights.json
+.abc-audit-hash
