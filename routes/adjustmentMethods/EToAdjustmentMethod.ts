@@ -205,10 +205,10 @@ export class TurfgrassManager {
                 return 1.2; // Even warm season grasses stress in extreme heat
             } else if (temp > 85) {
                 return 1.1; // Optimal growing conditions
-            } else if (temp < 60) {
-                return 0.4; // Cool weather stress
             } else if (temp < 45) {
                 return 0.1; // Near dormancy
+            } else if (temp < 60) {
+                return 0.4; // Cool weather stress
             }
             return 1.0; // Good growing conditions
         }
