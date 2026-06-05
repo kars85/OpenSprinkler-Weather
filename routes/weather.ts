@@ -14,6 +14,7 @@ import ManualAdjustmentMethod from "./adjustmentMethods/ManualAdjustmentMethod";
 import ZimmermanAdjustmentMethod from "./adjustmentMethods/ZimmermanAdjustmentMethod";
 import RainDelayAdjustmentMethod from "./adjustmentMethods/RainDelayAdjustmentMethod";
 import EToAdjustmentMethod from "./adjustmentMethods/EToAdjustmentMethod";
+import WaterBudgetAdjustmentMethod from "./adjustmentMethods/WaterBudgetAdjustmentMethod";
 import { CodedError, ErrorCode, makeCodedError } from "../errors";
 import { Geocoder } from "./geocoders/Geocoder";
 
@@ -38,11 +39,12 @@ const filters = {
 	timezone: /^()()()()()()([+-])(\d{2})(\d{2})/
 };
 
-const ADJUSTMENT_METHOD: { [ key: number ] : AdjustmentMethod } = {
+export const ADJUSTMENT_METHOD: { [ key: number ] : AdjustmentMethod } = {
 	0: ManualAdjustmentMethod,
 	1: ZimmermanAdjustmentMethod,
 	2: RainDelayAdjustmentMethod,
-	3: EToAdjustmentMethod
+	3: EToAdjustmentMethod,
+	4: WaterBudgetAdjustmentMethod
 };
 
 const cache = new WateringScaleCache();

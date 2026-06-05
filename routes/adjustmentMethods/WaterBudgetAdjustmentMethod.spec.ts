@@ -4,6 +4,7 @@ import { WeatherProvider } from "../weatherProviders/WeatherProvider";
 import { EToData } from "./EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
 import WaterBudgetAdjustmentMethod from "./WaterBudgetAdjustmentMethod";
+import { ADJUSTMENT_METHOD } from "../weather";
 
 class StubProvider extends WeatherProvider {
 	constructor( private readonly data: EToData | null, private readonly fail = false ) { super(); }
@@ -72,5 +73,11 @@ describe( "WaterBudgetAdjustmentMethod", () => {
 			await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, [ 9.99, 9.99 ], new StubProvider( null, true ) );
 		} catch ( e ) { threw = e; }
 		expect( threw ).to.be.instanceOf( CodedError );
+	} );
+} );
+
+describe( "WaterBudget registration", () => {
+	it( "is registered as adjustment method 4", () => {
+		expect( ADJUSTMENT_METHOD[ 4 ] ).to.equal( WaterBudgetAdjustmentMethod );
 	} );
 } );
