@@ -74,6 +74,7 @@ export default class OpenMeteoWeatherProvider extends EnhancedWeatherProvider {
 		let maxIndex: number = 0;
 
 		const totals = { temp: 0, humidity: 0, precip: 0, raining: false };
+		const sampleCounts = { temp: 0, humidity: 0 };
 		const now: number = moment().unix();
 
 		for (let index = 0;  index < yesterdayData.hourly.time.length; index++ ) {
@@ -83,15 +84,25 @@ export default class OpenMeteoWeatherProvider extends EnhancedWeatherProvider {
 				totals.raining = yesterdayData.hourly.precipitation[maxIndex] > 0 || yesterdayData.hourly.precipitation[index] > 0;
 				break;
 			}
-			totals.temp += yesterdayData.hourly.temperature_2m[index];
-			totals.humidity += yesterdayData.hourly.relativehumidity_2m[index];
+			if (Number.isFinite(yesterdayData.hourly.temperature_2m[index])) {
+				totals.temp += yesterdayData.hourly.temperature_2m[index];
+				sampleCounts.temp++;
+			}
+			if (Number.isFinite(yesterdayData.hourly.relativehumidity_2m[index])) {
+				totals.humidity += yesterdayData.hourly.relativehumidity_2m[index];
+				sampleCounts.humidity++;
+			}
 			totals.precip += yesterdayData.hourly.precipitation[index]  || 0;
+		}
+
+		if (sampleCounts.temp === 0 || sampleCounts.humidity === 0) {
+			throw new CodedError( ErrorCode.InsufficientWeatherData );
 		}
 
 		const result : ZimmermanWateringData = {
 			weatherProvider: "OpenMeteo",
-			temp: totals.temp / maxIndex,
-			humidity: totals.humidity / maxIndex,
+			temp: totals.temp / sampleCounts.temp,
+			humidity: totals.humidity / sampleCounts.humidity,
 			precip: totals.precip,
 			raining: totals.raining
 		}
@@ -182,6 +193,7 @@ export default class OpenMeteoWeatherProvider extends EnhancedWeatherProvider {
 		let minTemp: number = undefined, maxTemp: number = undefined, precip: number = 0;
 		let wind: number = 0, solar: number = 0;
 		let maxIndex: number = 0;
+		let solarSampleCount: number = 0;
 		const now: number = moment().unix();
 		for (let index = 0;  index < historicData.hourly.time.length; index++ ) {
 			if (historicData.hourly.time[index] > now)
@@ -200,10 +212,17 @@ export default class OpenMeteoWeatherProvider extends EnhancedWeatherProvider {
 			minHumidity = minHumidity < historicData.hourly.relativehumidity_2m[index] ? minHumidity : historicData.hourly.relativehumidity_2m[index];
 			maxHumidity = maxHumidity > historicData.hourly.relativehumidity_2m[index] ? maxHumidity : historicData.hourly.relativehumidity_2m[index];
 
-			solar += historicData.hourly.direct_radiation[index];
+			if (Number.isFinite(historicData.hourly.direct_radiation[index])) {
+				solar += historicData.hourly.direct_radiation[index];
+				solarSampleCount++;
+			}
 		}
 
-		solar = solar / maxIndex * 24 / 1000;
+		if (solarSampleCount === 0) {
+			throw new CodedError( ErrorCode.InsufficientWeatherData );
+		}
+
+		solar = solar / solarSampleCount * 24 / 1000;
 		const result : EToData = {
 			weatherProvider: "OpenMeteo",
 			periodStartTime: historicData.hourly.time[0],
