@@ -12,3 +12,8 @@ process.env.TZ = "UTC";
 // before in-file `process.env.X = ...` assignments.
 process.env.WEATHER_PROVIDER = process.env.WEATHER_PROVIDER || "OWM";
 process.env.OWM_API_KEY = process.env.OWM_API_KEY || "NO_KEY";
+
+// Water-budget state during tests goes to a throwaway file, never the real one.
+process.env.BUDGET_STATE_FILE = process.env.BUDGET_STATE_FILE
+	|| require( "path" ).join( require( "os" ).tmpdir(), "wb-test-state.json" );
+try { require( "fs" ).unlinkSync( process.env.BUDGET_STATE_FILE ); } catch ( e ) { /* fine if absent */ }
