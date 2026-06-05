@@ -54,4 +54,6 @@ export interface AdjustmentOptions {
 	key?: string;
 	/** The provider selected using the UI. */
 	provider?: string;
+	/** Per-request fallback provider chain (array or CSV) overriding WEATHER_PROVIDER_FALLBACKS. */
+	fallbacks?: string | string[];
 }

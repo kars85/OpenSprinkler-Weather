@@ -8,11 +8,12 @@ import * as MockDate from 'mockdate';
 process.env.WEATHER_PROVIDER = "OWM";
 process.env.OWM_API_KEY = "NO_KEY";
 
-import { convertToLegacyFormat, getWateringData } from './weather';
+import { convertToLegacyFormat, getWateringData, resolveWeatherProvider } from './weather';
 import { GeoCoordinates, WeatherData, ZimmermanWateringData } from "../types";
 import { WeatherProvider } from "./weatherProviders/WeatherProvider";
 import { EToData } from "./adjustmentMethods/EToAdjustmentMethod";
 import ManualAdjustmentMethod from './adjustmentMethods/ManualAdjustmentMethod';
+import { FallbackWeatherProvider } from './weatherProviders/FallbackWeatherProvider';
 
 const expected = require( '../test/expected.json' );
 const replies = require( '../test/replies.json' );
@@ -28,6 +29,62 @@ describe( 'convertToLegacyFormat skip passthrough', () => {
 		const out: any = convertToLegacyFormat( enhanced, ManualAdjustmentMethod );
 		expect( out.rawData.skip ).to.equal( 1 );
 		expect( out.rawData.skipReason ).to.equal( 'freeze: 28F at or below 32F' );
+	} );
+} );
+
+describe( 'convertToLegacyFormat pwsBypassed passthrough', () => {
+	it( 'preserves pwsBypassed / pwsBypassReason for any method', () => {
+		const enhanced = {
+			scale: 70, rd: undefined, tz: 32, sunrise: 100, sunset: 200, eip: 1, errCode: 0,
+			rawData: { wp: 'OWM', pwsBypassed: 1, pwsBypassReason: 'errCode 12' }
+		};
+		const out: any = convertToLegacyFormat( enhanced, ManualAdjustmentMethod );
+		expect( out.rawData.pwsBypassed ).to.equal( 1 );
+		expect( out.rawData.pwsBypassReason ).to.equal( 'errCode 12' );
+	} );
+} );
+
+describe( 'resolveWeatherProvider', () => {
+	afterEach( () => {
+		delete process.env.WEATHER_PROVIDER_FALLBACKS;
+		delete process.env.PWS_FALLBACK_ENABLED;
+		delete process.env.WEATHER_PROVIDER;
+	} );
+
+	it( 'returns a bare provider when no chain is configured', () => {
+		const p = resolveWeatherProvider( { provider: 'OWM' } as any, undefined );
+		expect( p ).to.not.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'returns a FallbackWeatherProvider when WEATHER_PROVIDER_FALLBACKS is set', () => {
+		process.env.WEATHER_PROVIDER_FALLBACKS = 'DWD,Apple';
+		const p = resolveWeatherProvider( { provider: 'OWM' } as any, undefined );
+		expect( p ).to.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'lets wto.fallbacks trigger the composite even when env is unset', () => {
+		const p = resolveWeatherProvider( { provider: 'OWM', fallbacks: [ 'DWD' ] } as any, undefined );
+		expect( p ).to.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'honors a PWS with no fallback by default (bare provider)', () => {
+		process.env.WEATHER_PROVIDER_FALLBACKS = 'DWD';
+		const p = resolveWeatherProvider( { provider: 'WU' } as any, { id: 'KXX', apiKey: 'x' } );
+		expect( p ).to.not.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'adds the chain to the PWS path only when PWS_FALLBACK_ENABLED', () => {
+		process.env.WEATHER_PROVIDER_FALLBACKS = 'DWD';
+		process.env.PWS_FALLBACK_ENABLED = 'true';
+		const p = resolveWeatherProvider( { provider: 'WU' } as any, { id: 'KXX', apiKey: 'x' } );
+		expect( p ).to.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'returns a bare local provider in local mode (no chain)', () => {
+		process.env.WEATHER_PROVIDER = 'local';
+		process.env.WEATHER_PROVIDER_FALLBACKS = 'DWD';
+		const p = resolveWeatherProvider( { provider: 'OWM' } as any, undefined );
+		expect( p ).to.not.be.instanceOf( FallbackWeatherProvider );
 	} );
 } );
 

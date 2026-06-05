@@ -63,6 +63,7 @@ For more information on the "WeeWX Solution" click [here](docs/weewx.md)
 
 - For multi-day, rain-aware **Water-Budget** watering (adjustment method 4), see [here](docs/water-budget.md)
 - For optional **freeze / wind / rain skips** (force watering to 0% in bad conditions), see [here](docs/weather-skips.md)
+- For optional **weather provider fallback** (try a backup provider when the primary fails), see [here](docs/weather-provider-fallback.md)
 
 ## Docker
 

@@ -9,6 +9,16 @@ import { CodedError, ErrorCode } from "../../errors";
 import { EnhancedWeatherProvider, ForecastEToData } from "../weatherProviders/local";
 
 /**
+ * Structural (duck-typed) capability check that ALSO narrows the type so the forecast block can
+ * call the forecast methods. Replaces an `instanceof EnhancedWeatherProvider` check that (a)
+ * excluded the FallbackWeatherProvider wrapper and (b) silently excluded OpenMeteo, whose
+ * EnhancedWeatherProvider is a different class from local's.
+ */
+export function supportsForecast( wp: any ): wp is EnhancedWeatherProvider {
+	return !!wp && typeof wp.supportsForecasting === "function" && wp.supportsForecasting();
+}
+
+/**
  * Enhanced turfgrass management with crop coefficients and seasonal intelligence
  */
 
@@ -349,7 +359,7 @@ async function calculateEToWateringScale(
     const irrigationEfficiency = TurfgrassManager.getIrrigationEfficiency(irrigationSystem);
 
     // Try enhanced forecast integration if provider supports it
-    if (weatherProvider instanceof EnhancedWeatherProvider && weatherProvider.supportsForecasting()) {
+    if (supportsForecast(weatherProvider)) {
         const enableForecast = process.env.ENABLE_FORECAST !== 'false';
         
         if (enableForecast) {

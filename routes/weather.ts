@@ -18,6 +18,7 @@ import WaterBudgetAdjustmentMethod from "./adjustmentMethods/WaterBudgetAdjustme
 import { CodedError, ErrorCode, makeCodedError } from "../errors";
 import { Geocoder } from "./geocoders/Geocoder";
 import { applyWeatherSkips } from "./skips/SkipGuard";
+import { buildFallbackChain, FallbackWeatherProvider, isPwsFallbackEnabled, parseFallbackKeys } from "./weatherProviders/FallbackWeatherProvider";
 
 const WEATHER_PROVIDERS: { [method: string] : WeatherProvider} = {
 	"AW": new ( require("./weatherProviders/AccuWeather" ).default )(),
@@ -31,6 +32,30 @@ const WEATHER_PROVIDERS: { [method: string] : WeatherProvider} = {
 
 const PWS_WEATHER_PROVIDER: WeatherProvider = new ( require("./weatherProviders/" + ( process.env.PWS_WEATHER_PROVIDER || "WUnderground" ) ).default )();
 const GEOCODER: Geocoder = new ( require("./geocoders/" + ( process.env.GEOCODER || "WUnderground" ) ).default )();
+
+/**
+ * Select the WeatherProvider for a request. Returns a bare provider when no fallback chain is
+ * configured (identical to the historical behavior), or a FallbackWeatherProvider composite when
+ * a chain is present. PWS default honors the station (bare); the chain is added to the PWS path
+ * only when PWS_FALLBACK_ENABLED. Local mode always returns a bare local provider (no chain).
+ */
+export function resolveWeatherProvider(
+	adjustmentOptions: AdjustmentOptions,
+	pws: PWS | undefined
+): WeatherProvider {
+	if ( process.env.WEATHER_PROVIDER === "local" ) {
+		return new ( require( "./weatherProviders/local" ).default )();
+	}
+	const lookup = ( key: string ): WeatherProvider | undefined => WEATHER_PROVIDERS[ key ];
+	if ( pws && pws.id ) {
+		if ( !isPwsFallbackEnabled() ) return PWS_WEATHER_PROVIDER;
+		const pwsChain = buildFallbackChain( PWS_WEATHER_PROVIDER, parseFallbackKeys( adjustmentOptions ), lookup );
+		return pwsChain.length > 1 ? new FallbackWeatherProvider( pwsChain, true ) : PWS_WEATHER_PROVIDER;
+	}
+	const primary = WEATHER_PROVIDERS[ adjustmentOptions.provider ] || WEATHER_PROVIDERS[ "Apple" ];
+	const chain = buildFallbackChain( primary, parseFallbackKeys( adjustmentOptions ), lookup );
+	return chain.length > 1 ? new FallbackWeatherProvider( chain, false ) : primary;
+}
 
 const filters = {
 	gps: /^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/,
@@ -141,6 +166,13 @@ export function convertToLegacyFormat(enhancedData: any, adjustmentMethod: Adjus
 			legacyData.rawData.skip = rawDataSource.skip;
 			if ( rawDataSource.skipReason !== undefined ) {
 				legacyData.rawData.skipReason = rawDataSource.skipReason;
+			}
+		}
+		// Universal passthrough for cross-cutting fallback metadata (applies to ALL methods).
+		if ( rawDataSource.pwsBypassed ) {
+			legacyData.rawData.pwsBypassed = rawDataSource.pwsBypassed;
+			if ( rawDataSource.pwsBypassReason !== undefined ) {
+				legacyData.rawData.pwsBypassReason = rawDataSource.pwsBypassReason;
 			}
 		}
 	} else {
@@ -261,12 +293,7 @@ export const getWeatherData = async function( req: express.Request, res: express
 		pws = {apiKey: adjustmentOptions.key};
 	}
 
-	let activeWeatherProvider: WeatherProvider;
-	if (process.env.WEATHER_PROVIDER === "local") {
-		activeWeatherProvider = new ( require("./weatherProviders/local" ).default )();
-	} else {
-		activeWeatherProvider = WEATHER_PROVIDERS[adjustmentOptions.provider] || WEATHER_PROVIDERS['Apple'];
-	}
+	let activeWeatherProvider: WeatherProvider = resolveWeatherProvider( adjustmentOptions, pws );
 	debugLog(`DEBUG getWeatherData: Using provider: ${activeWeatherProvider.constructor.name}`);
 	
 	const timeData: TimeData = getTimeDataForCoordinates( coordinates );
@@ -343,16 +370,7 @@ export const getWateringData = async function( req: express.Request, res: expres
 		pws = {apiKey: adjustmentOptions.key};
 	}
 
-	let weatherProvider: WeatherProvider;
-	if( pws && pws.id ){
-		weatherProvider = PWS_WEATHER_PROVIDER;
-	} else {
-		if (process.env.WEATHER_PROVIDER === "local") {
-			weatherProvider = new ( require("./weatherProviders/local" ).default )();
-		} else {
-			weatherProvider = WEATHER_PROVIDERS[adjustmentOptions.provider] || WEATHER_PROVIDERS['Apple'];
-		}
-	}
+	let weatherProvider: WeatherProvider = resolveWeatherProvider( adjustmentOptions, pws );
 	debugLog(`DEBUG getWateringData: Selected weather provider: ${weatherProvider.constructor.name}`);
 
 	const initialDataStructure = {
@@ -406,7 +424,14 @@ export const getWateringData = async function( req: express.Request, res: expres
 				dataToSend.scale = 0;
 			}
 		}
-		if ( weatherProvider.shouldCacheWateringScale() ) {
+		if ( ( weatherProvider as any ).pwsBypassed && dataToSend.rawData ) {
+			dataToSend.rawData = {
+				...dataToSend.rawData,
+				pwsBypassed: 1,
+				pwsBypassReason: ( weatherProvider as any ).pwsBypassReason
+			};
+		}
+		if ( weatherProvider.shouldCacheWateringScale() && !( weatherProvider as any ).servedFallback ) {
             const cacheEntry = { scale: dataToSend.scale, rawData: dataToSend.rawData, rainDelay: dataToSend.rd };
             debugLog(`DEBUG getWateringData: Caching watering scale: ${JSON.stringify(cacheEntry)}`);
 			cache.storeWateringScale( adjustmentParam, coordinates, pws, adjustmentOptions, cacheEntry );
