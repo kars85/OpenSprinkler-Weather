@@ -20,6 +20,7 @@ export class FileStateStore implements StateStore {
 	private readonly path: string;
 	private cache: { [ key: string ]: BudgetState } = {};
 	private loaded = false;
+	private writeSeq = 0;
 
 	public constructor( filePath: string ) {
 		this.path = filePath;
@@ -47,7 +48,9 @@ export class FileStateStore implements StateStore {
 	public async set( key: string, state: BudgetState ): Promise< void > {
 		this.load();
 		this.cache[ key ] = state;
-		const tmp = `${ this.path }.${ process.pid }.tmp`;
+		// Unique temp name per write (pid + sequence) so overlapping writes to
+		// different keys never race on a shared temp path before the atomic rename.
+		const tmp = `${ this.path }.${ process.pid }.${ this.writeSeq++ }.tmp`;
 		fs.writeFileSync( tmp, JSON.stringify( this.cache ) );
 		fs.renameSync( tmp, this.path );
 	}

@@ -804,7 +804,7 @@ git commit -m "feat(water-budget): register WaterBudget as adjustment method 4 [
 
 ## Task 6: Preserve WaterBudget fields in the legacy response + route-level test
 
-`convertToLegacyFormat()` in `weather.ts` only copies detailed `rawData` for ETo and Zimmerman; every other method is reduced to `{ wp }`. Because `SIMPLIFIED_RESPONSE_FORMAT` defaults on, method 4's `reason`/`bank`/`eto` would be stripped from the response. Add a WaterBudget branch and prove the whole thing end-to-end through `getWateringData` (which also exercises the per-method watering-scale cache path — confirming integration finding #5). This test is the one that would have caught the stripping bug, which the direct-method unit tests miss.
+`convertToLegacyFormat()` in `weather.ts` only copies detailed `rawData` for ETo and Zimmerman; every other method is reduced to `{ wp }`. Because `SIMPLIFIED_RESPONSE_FORMAT` defaults on, method 4's `reason`/`bank`/`eto` would be stripped from the response. Add a WaterBudget branch and prove the whole thing end-to-end through `getWateringData` → `convertToLegacyFormat`. This test is the one that would have caught the stripping bug, which the direct-method unit tests miss. (Note: it does **not** exercise the watering-scale cache — the OWM provider's `shouldCacheWateringScale()` is `false`, so the cache is skipped here. The cache path is compatible by inspection — it's keyed per-method and serves the stored `rawData`, advancing state once/day — but is not unit-tested; a caching-provider test is a fast-follow.)
 
 **Files:**
 - Modify: `routes/weather.ts` (`convertToLegacyFormat`, the method-specific `rawData` branches)
