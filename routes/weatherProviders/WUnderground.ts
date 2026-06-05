@@ -145,14 +145,19 @@ export default class WUnderground extends WeatherProvider {
 
 		let minHumidity: number = undefined, maxHumidity: number = undefined;
 		let minTemp: number = undefined, maxTemp: number = undefined
-		let precip: number = 0, precip0: number = 0, precip1: number = 0, precip2: number = 0;
+		let precip: number = 0, previousPrecip: number = 0;
 		let wind: number = 0, solar: number = 0;
 		let n : number = 0, nig : number = 0;
 		const fromEpoch = fromDate.unix();
+		const addPrecipDelta = ( currentPrecip: number ) => {
+			const delta = currentPrecip - previousPrecip;
+			precip += delta >= 0 ? delta : Math.max( currentPrecip, 0 );
+			previousPrecip = currentPrecip;
+		};
 
 		for ( const hour of historicData1.observations ) {
 			if (hour.epoch < fromEpoch) {
-				precip0 = hour.imperial.precipTotal;
+				previousPrecip = hour.imperial.precipTotal;
 				nig++;
 				continue;
 			}
@@ -160,7 +165,7 @@ export default class WUnderground extends WeatherProvider {
 			minTemp = minTemp < hour.imperial.tempLow ? minTemp : hour.imperial.tempLow;
 			maxTemp = maxTemp > hour.imperial.tempHigh ? maxTemp : hour.imperial.tempHigh;
 
-			precip1 = hour.imperial.precipTotal;
+			addPrecipDelta( hour.imperial.precipTotal );
 
 			if (hour.imperial.windspeedAvg != null && hour.imperial.windspeedAvg > wind)
 				wind = hour.imperial.windspeedAvg;
@@ -177,7 +182,7 @@ export default class WUnderground extends WeatherProvider {
 			minTemp = minTemp < hour.imperial.tempLow ? minTemp : hour.imperial.tempLow;
 			maxTemp = maxTemp > hour.imperial.tempHigh ? maxTemp : hour.imperial.tempHigh;
 
-			precip2 = hour.imperial.precipTotal;
+			addPrecipDelta( hour.imperial.precipTotal );
 
 			if (hour.imperial.windspeedAvg != null && hour.imperial.windspeedAvg > wind)
 				wind = hour.imperial.windspeedAvg;
@@ -191,8 +196,6 @@ export default class WUnderground extends WeatherProvider {
 		}
 
 		solar = solar / n * 24 / 1000; //Watts/m2 in 24h -->KWh/m2
-		precip = precip1 + precip2 - precip0;
-
 		const result : EToData = {
 			weatherProvider: "WU",
 			periodStartTime: fromDate.unix(),
