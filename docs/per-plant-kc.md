@@ -4,7 +4,7 @@ The **ETo** watering method (adjustment method 3) scales watering by a crop coef
 (Kc). By default it uses turfgrass coefficients. You can instead pick a **plant preset**
 (for beds, shrubs, trees, a vegetable garden, etc.) or supply an **explicit Kc override**.
 
-This applies to the ETo method only. (The Water-Budget method does not use Kc yet.)
+The ETo method uses `PLANT_TYPE` / `CUSTOM_CROP_COEFFICIENT`; the Water-Budget method uses separate `BUDGET_` settings described below.
 
 ## Selecting a coefficient
 
@@ -36,3 +36,10 @@ day-of-year, peaking around mid-July (Northern hemisphere). An unrecognized `pla
 back to the turfgrass calculation. The chosen source appears in the response as
 `rawData.crop_factors.source` (`override`, `plant`, or the turfgrass factors), and the resolved
 value as `rawData.crop_coefficient` (legacy `kc`).
+
+## Water-Budget method
+
+The Water-Budget method (adjustment method 4) also supports these plant presets, but via
+its own **env-only** settings — `BUDGET_PLANT_TYPE` and `BUDGET_CUSTOM_CROP_COEFFICIENT`
+(not the `PLANT_TYPE` / `CUSTOM_CROP_COEFFICIENT` used by the ETo method). The preset
+catalog and seasonal curves are identical. See the Water-Budget guide for details.

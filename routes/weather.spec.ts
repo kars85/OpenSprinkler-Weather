@@ -13,6 +13,7 @@ import { GeoCoordinates, WeatherData, ZimmermanWateringData } from "../types";
 import { WeatherProvider } from "./weatherProviders/WeatherProvider";
 import { EToData } from "./adjustmentMethods/EToAdjustmentMethod";
 import ManualAdjustmentMethod from './adjustmentMethods/ManualAdjustmentMethod';
+import WaterBudgetAdjustmentMethod from './adjustmentMethods/WaterBudgetAdjustmentMethod';
 import { FallbackWeatherProvider } from './weatherProviders/FallbackWeatherProvider';
 
 const expected = require( '../test/expected.json' );
@@ -41,6 +42,18 @@ describe( 'convertToLegacyFormat pwsBypassed passthrough', () => {
 		const out: any = convertToLegacyFormat( enhanced, ManualAdjustmentMethod );
 		expect( out.rawData.pwsBypassed ).to.equal( 1 );
 		expect( out.rawData.pwsBypassReason ).to.equal( 'errCode 12' );
+	} );
+} );
+
+describe( 'convertToLegacyFormat WaterBudget kc passthrough', () => {
+	it( 'forwards kc / kcSource for the WaterBudget method when present', () => {
+		const enhanced = {
+			scale: 80, rd: undefined, tz: 32, sunrise: 100, sunset: 200, eip: 1, errCode: 0,
+			rawData: { wp: 'WaterBudget', eto: 0.2, etc: 0.16, p: 0, bank: 0, reason: 'Scale 80%: dry conditions.', kc: 0.8, kcSource: 'plant' }
+		};
+		const out: any = convertToLegacyFormat( enhanced, WaterBudgetAdjustmentMethod );
+		expect( out.rawData.kc ).to.equal( 0.8 );
+		expect( out.rawData.kcSource ).to.equal( 'plant' );
 	} );
 } );
 

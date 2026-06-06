@@ -160,6 +160,10 @@ export function convertToLegacyFormat(enhancedData: any, adjustmentMethod: Adjus
 				eto: rawDataSource.eto, etc: rawDataSource.etc, p: rawDataSource.p,
 				bank: rawDataSource.bank, reason: rawDataSource.reason
 			});
+			if ( rawDataSource.kcSource !== undefined ) {
+				legacyData.rawData.kc = rawDataSource.kc;
+				legacyData.rawData.kcSource = rawDataSource.kcSource;
+			}
 		}
 		// Universal passthrough for cross-cutting weather-skip metadata (applies to ALL methods).
 		if ( rawDataSource.skip ) {

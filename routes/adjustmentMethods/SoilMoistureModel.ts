@@ -1,6 +1,8 @@
 export interface BudgetParams {
 	/** Crop coefficient applied to reference ETo to get demand. */
 	kc: number;
+	/** Reference crop coefficient for normalization + bank cap. Defaults to `kc` when omitted. */
+	referenceKc?: number;
 	/** Upper clamp for the returned scale (e.g. 200). */
 	maxScale: number;
 	/** Fraction of precip counted as effective rain (0..1). */
@@ -23,6 +25,8 @@ export interface DecisionRecord {
 	referenceEtc: number;
 	resolvedLocation?: string;
 	reason: string;
+	demandKc?: number;
+	kcSource?: string;
 }
 
 export interface BudgetState {
@@ -39,6 +43,7 @@ export interface StepInput {
 	referenceEto: number;
 	resolvedLocation?: string;
 	params: BudgetParams;
+	kcSource?: string;
 }
 
 export interface StepResult {
@@ -92,8 +97,9 @@ export function step( prev: BudgetState | undefined, input: StepInput ): StepRes
 	// bound (a small negative would fake rain memory), and missing weather fields can
 	// yield NaN — note Math.max(0, NaN) === NaN, which would otherwise persist a
 	// corrupted (NaN) rain bank and poison this location forever.
-	const etc = Math.max( 0, fin( eto ) ) * params.kc;
-	const referenceEtc = Math.max( 0, fin( referenceEto ) ) * params.kc;
+	const refKc = params.referenceKc === undefined ? params.kc : params.referenceKc;
+	const etc = Math.max( 0, fin( eto ) ) * fin( params.kc );
+	const referenceEtc = Math.max( 0, fin( referenceEto ) ) * fin( refKc );
 	const effectiveRain = Math.max( 0, fin( precip ) ) * params.runoffFactor;
 
 	// Same-day re-poll: return the stored result unchanged (idempotent).
@@ -129,7 +135,8 @@ export function step( prev: BudgetState | undefined, input: StepInput ): StepRes
 		eto: round2( eto ), etc: round2( etc ), effectiveRain: round2( effectiveRain ),
 		unmetDemand: round2( unmetDemand ), rainBankBefore: round2( rainBankBefore ),
 		rainBankAfter: round2( rainBankAfter ), referenceEtc: round2( referenceEtc ),
-		resolvedLocation, reason
+		resolvedLocation, reason,
+		demandKc: round2( params.kc ), kcSource: input.kcSource
 	};
 	const history = ( prev ? prev.history : [] ).concat( record ).slice( -HISTORY_CAP );
 

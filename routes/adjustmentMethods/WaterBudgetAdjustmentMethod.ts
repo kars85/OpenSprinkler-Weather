@@ -6,6 +6,7 @@ import { WeatherProvider } from "../weatherProviders/WeatherProvider";
 import { calculateETo, EToData, EToScalingAdjustmentOptions } from "./EToAdjustmentMethod";
 import { getBaselineDailyETo } from "../baselineETo";
 import { BudgetParams, BudgetState, DecisionRecord, step } from "./SoilMoistureModel";
+import { resolveCropCoefficient } from "./PlantCoefficients";
 import { FileStateStore, StateStore } from "../state/StateStore";
 import { CodedError, ErrorCode, makeCodedError } from "../../errors";
 
@@ -32,8 +33,10 @@ function optNum( value: any, fallback: number ): number {
 // so a same-day kc/mx change could not take effect and would mislead. Per-request
 // tuning is a deliberate future enhancement.
 function resolveParams(): BudgetParams {
+	const baseKc = envNum( "BUDGET_KC", 0.9 );
 	return {
-		kc: envNum( "BUDGET_KC", 0.9 ),
+		kc: baseKc,
+		referenceKc: baseKc,
 		maxScale: envNum( "BUDGET_MAX_SCALE", 200 ),
 		runoffFactor: Math.min( 1, envNonNegativeNum( "BUDGET_RUNOFF", 1.0 ) ),
 		rainBankCapDays: envNum( "BUDGET_RAINBANK_CAP_DAYS", 14 ),
@@ -66,7 +69,7 @@ function round( v: number, dp: number ): number {
 }
 
 function buildRawDataFromDecision( weatherProvider: string, scale: number, record: DecisionRecord ) {
-	return {
+	const raw: any = {
 		wp: weatherProvider,
 		scale,
 		eto: record.eto,
@@ -75,6 +78,11 @@ function buildRawDataFromDecision( weatherProvider: string, scale: number, recor
 		bank: round( record.rainBankAfter, 2 ),
 		reason: record.reason
 	};
+	if ( record.kcSource && record.kcSource !== "budget" ) {
+		raw.kc = record.demandKc;
+		raw.kcSource = record.kcSource;
+	}
+	return raw;
 }
 
 async function calculateWaterBudgetScale(
@@ -138,8 +146,25 @@ async function calculateWaterBudgetScale(
 		referenceEto = envNum( "BUDGET_DEFAULT_REF_ETO", 0.15 );
 	}
 
+	const referenceKc = params.referenceKc === undefined ? params.kc : params.referenceKc;
+	const dayOfYear = moment.unix( etoData.periodStartTime )
+		.tz( geoTZ( coordinates[ 0 ], coordinates[ 1 ] )[ 0 ] ).dayOfYear();
+	const kcEnv = {
+		PLANT_TYPE: process.env.BUDGET_PLANT_TYPE,
+		CUSTOM_CROP_COEFFICIENT: process.env.BUDGET_CUSTOM_CROP_COEFFICIENT
+	};
+	const resolvedKc = resolveCropCoefficient(
+		{}, dayOfYear,
+		() => ( { kc: referenceKc, factors: { source: "budget" } } ),
+		kcEnv
+	);
+	let demandKc = resolvedKc.kc;
+	if ( !Number.isFinite( demandKc ) || demandKc <= 0 ) demandKc = referenceKc;
+	const kcSource: string | undefined = resolvedKc.factors && resolvedKc.factors.source;
+
 	const { state, scale, reason } = step( prev, {
-		today, eto, precip: etoData.precip, referenceEto, resolvedLocation: undefined, params
+		today, eto, precip: etoData.precip, referenceEto, resolvedLocation: undefined,
+		kcSource, params: { ...params, kc: demandKc }
 	} );
 	await safeSet( key, state );
 	const last = state.history[ state.history.length - 1 ];
@@ -148,15 +173,19 @@ async function calculateWaterBudgetScale(
 		scale,
 		rawData: last
 			? buildRawDataFromDecision( etoData.weatherProvider, scale, last )
-			: {
-				wp: etoData.weatherProvider,
-				scale,
-				eto: round( eto, 3 ),
-				etc: round( eto * params.kc, 3 ),
-				p: round( etoData.precip * params.runoffFactor, 2 ),
-				bank: round( state.rainBank, 2 ),
-				reason
-			},
+			: ( () => {
+				const raw: any = {
+					wp: etoData.weatherProvider,
+					scale,
+					eto: round( eto, 3 ),
+					etc: round( eto * demandKc, 3 ),
+					p: round( etoData.precip * params.runoffFactor, 2 ),
+					bank: round( state.rainBank, 2 ),
+					reason
+				};
+				if ( kcSource && kcSource !== "budget" ) { raw.kc = round( demandKc, 2 ); raw.kcSource = kcSource; }
+				return raw;
+			} )(),
 		wateringData: etoData
 	};
 }
