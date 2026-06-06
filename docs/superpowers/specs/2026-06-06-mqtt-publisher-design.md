@@ -61,6 +61,8 @@ setInterval tick ─▶ gatherState() ─▶ buildStatePayloads() ─▶ client.
 
 `adjustmentParam = MQTT_METHOD | (MQTT_RESTRICT ? (1<<7) : 0)`.
 
+**Config validation (in `resolveMqttConfig`):** `MQTT_TOPIC_PREFIX`, `MQTT_DISCOVERY_PREFIX`, and `MQTT_DEVICE_ID` are trimmed and must be non-empty and contain no MQTT wildcards (`+`, `#`). `MQTT_DEVICE_ID` additionally must match `^[a-zA-Z0-9_-]+$` (it is embedded in topic segments and `unique_id`s; no `/`). Invalid config → log a clear warning and **do not start** the publisher (HTTP server unaffected).
+
 **Secret hygiene (#9):** broker URL credentials, `MQTT_PASSWORD`, `MQTT_KEY`, and provider keys are **never** placed in any published payload or discovery config, and are redacted in logs via `redactLogValue`/`redactLogString`.
 
 ---
@@ -84,9 +86,12 @@ Each tick, `gatherState()` collects three sections **independently** (a failure 
 
 1. **watering:** `computeWateringDecision({ coordinates, adjustmentParam, adjustmentOptions, pws })` → `shapeWateringResponse`. Follows the **same cache behavior as `/v1`/legacy** (cache-enabled providers may return the day's cached scale; not a forced fresh calc each interval).
 2. **weather:** `resolveWeatherProvider(adjustmentOptions, pws).getWeatherData(coordinates, pws)` → `shapeWeatherResponse`. **Fresh each tick.**
-3. **budget:** `getBudgetState(coordinates)` → if present, `shapeBudgetResponse`; if absent (method ≠ 4, or first boot before any HTTP-driven calc), **skip the budget topic**.
+3. **budget:** `getBudgetState(coordinates)` → **publish whenever state exists, independent of `MQTT_METHOD`** (a site that previously ran method 4 over HTTP may have a stored bank even if `MQTT_METHOD` is now something else — publish it). When `getBudgetState` returns `undefined` (no stored state for this location yet), **skip the budget topic**.
+
+`adjustmentOptions` (`{ provider, pws, key }`) and the `pws` object are built via the **same shared helper `buildPwsFromParams`** that `/v1` and the legacy handlers use — no third copy of the provider/PWS rules.
 
 Publishing rules:
+- **No overlapping ticks:** an `inFlight` guard skips (and logs) a new interval tick if the previous one is still running (weather calls can hang to timeout; overlapping retained publishes could race).
 - Publish only the sections that succeeded this tick. A section that throws is logged (redacted) and its **retained topic is left unchanged** — no error payload overwrites good state.
 - After the tick, publish `status`: `{ ok: allSucceeded, errorCode?, lastError? }`.
 - **Availability is independent of compute health:** it reflects only the broker connection (LWT/connect). A failed weather fetch does **not** flip availability to `offline`.
@@ -128,8 +133,9 @@ The publisher calls these and pushes each via the injected client; the builders 
 
 - The `mqtt` client is created with `{ username, password, will: { topic: availability, payload: "offline", retain: true, qos: 0 } }`; it auto-reconnects.
 - On `connect`: publish discovery (retained), publish `online` (retained), run an immediate tick.
-- Compute/publish errors are caught and logged (redacted); they never crash the process and never overwrite a good retained topic.
-- When `MQTT_BROKER_URL` is unset, the publisher module is never required/loaded — the HTTP server is byte-for-byte unchanged.
+- Compute/publish errors are caught and logged (redacted); they never crash the process and never overwrite a good retained topic. **`publish` completion errors surface asynchronously** (callback/promise) — these are also caught, logged (redacted), and non-fatal.
+- An `inFlight` flag prevents overlapping ticks (§6).
+- When `MQTT_BROKER_URL` is unset, the publisher module is never required/loaded — **no runtime behavior change** to the HTTP server (only new files exist on disk).
 - On process shutdown (SIGTERM/SIGINT), best-effort publish `offline` + `client.end()` (graceful; optional, non-blocking).
 
 ---
