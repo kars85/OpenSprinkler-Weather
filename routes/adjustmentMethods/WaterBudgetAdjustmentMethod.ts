@@ -63,6 +63,11 @@ async function safeSet( key: string, state: BudgetState ): Promise< void > {
 	catch ( err ) { console.error( "WaterBudget: state write failed; continuing.", err ); }
 }
 
+/** Read-only accessor for a location's persisted Water-Budget state (for the /v1 API). */
+export async function getBudgetState( coordinates: GeoCoordinates ): Promise< BudgetState | undefined > {
+	return safeGet( stateKey( coordinates ) );
+}
+
 function round( v: number, dp: number ): number {
 	const f = Math.pow( 10, dp );
 	return Math.round( v * f ) / f;

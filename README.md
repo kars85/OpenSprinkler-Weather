@@ -65,6 +65,7 @@ For more information on the "WeeWX Solution" click [here](docs/weewx.md)
 - For optional **freeze / wind / rain skips** (force watering to 0% in bad conditions), see [here](docs/weather-skips.md)
 - For optional **weather provider fallback** (try a backup provider when the primary fails), see [here](docs/weather-provider-fallback.md)
 - For **per-plant crop coefficients** (plant presets or an explicit Kc for the ETo method), see [here](docs/per-plant-kc.md)
+- For the **`/v1` JSON API** (smart-home / dashboard read access: watering decision, weather, budget), see [here](docs/v1-api.md)
 
 ## Docker
 

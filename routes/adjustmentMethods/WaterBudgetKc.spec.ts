@@ -2,7 +2,7 @@ import { expect } from "chai";
 import { WeatherData, ZimmermanWateringData } from "../../types";
 import { WeatherProvider } from "../weatherProviders/WeatherProvider";
 import { EToData } from "./EToAdjustmentMethod";
-import WaterBudgetAdjustmentMethod from "./WaterBudgetAdjustmentMethod";
+import WaterBudgetAdjustmentMethod, { getBudgetState } from "./WaterBudgetAdjustmentMethod";
 
 class StubProvider extends WeatherProvider {
 	constructor( private readonly data: EToData ) { super(); }
@@ -66,5 +66,20 @@ describe( "WaterBudget per-plant Kc", () => {
 			expect( res.rawData.kcSource ).to.equal( undefined ); // source "budget" => omitted
 			expect( res.rawData.etc ).to.be.closeTo( res.rawData.eto * 0.9, 0.02 );
 		} );
+	} );
+} );
+
+describe( "WaterBudget getBudgetState", () => {
+	it( "returns undefined for a location with no stored state", async () => {
+		expect( await getBudgetState( [ 12.34, -56.78 ] ) ).to.equal( undefined );
+	} );
+
+	it( "returns the persisted state after a calculation", async () => {
+		const coords: [ number, number ] = [ 42.51, -72.51 ];
+		await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, coords, new StubProvider( etoData() ) );
+		const state = await getBudgetState( coords );
+		expect( state ).to.be.an( "object" );
+		expect( state!.history.length ).to.be.greaterThan( 0 );
+		expect( state!.lastScale ).to.be.a( "number" );
 	} );
 } );

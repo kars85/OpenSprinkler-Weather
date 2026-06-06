@@ -9,6 +9,7 @@ import { rateLimit } from "express-rate-limit";
 import * as weather from "./routes/weather";
 import * as local from "./routes/weatherProviders/local";
 import * as baselineETo from "./routes/baselineETo";
+import v1Router from "./routes/v1";
 import * as packageJson from "./package.json";
 
 let	host	= process.env.HOST || "127.0.0.1",
@@ -65,6 +66,8 @@ app.get( "/", function( req, res ) {
 // Handle requests matching /baselineETo
 app.options( /baselineETo/, cors() );
 app.get( /baselineETo/, cors(), baselineETo.getBaselineETo );
+
+app.use( "/v1", cors(), v1Router );
 
 // Handle 404 error
 app.use( function( req, res ) {

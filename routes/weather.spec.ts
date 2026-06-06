@@ -8,7 +8,7 @@ import * as MockDate from 'mockdate';
 process.env.WEATHER_PROVIDER = "OWM";
 process.env.OWM_API_KEY = "NO_KEY";
 
-import { convertToLegacyFormat, getWateringData, resolveWeatherProvider } from './weather';
+import { computeWateringDecision, convertToLegacyFormat, getWateringData, resolveWeatherProvider } from './weather';
 import { GeoCoordinates, WeatherData, ZimmermanWateringData } from "../types";
 import { WeatherProvider } from "./weatherProviders/WeatherProvider";
 import { EToData } from "./adjustmentMethods/EToAdjustmentMethod";
@@ -103,6 +103,27 @@ describe( 'resolveWeatherProvider', () => {
 
 describe('Watering Data', () => {
     beforeEach(() => MockDate.set('5/13/2019'));
+
+    it('computeWateringDecision returns a clean decision object reflecting the served provider', async () => {
+        mockGeocoder();
+        mockOWMWatering();
+        const { computeWateringDecision } = require('./weather');
+        const decision: any = await computeWateringDecision({
+            coordinates: [ 42.3732, -72.5199 ],
+            adjustmentParam: 1,                       // Zimmerman, no restriction bit
+            adjustmentOptions: { provider: 'OWM' },
+            pws: undefined
+        });
+        expect( decision.methodId ).to.equal( 1 );
+        expect( decision.methodName ).to.equal( 'zimmerman' );
+        expect( decision.scale ).to.be.a( 'number' );
+        expect( decision.weatherProvider ).to.equal( decision.rawData.wp );
+        expect( decision.skip ).to.equal( false );
+        expect( decision.servedFallback ).to.equal( false );
+        // No legacy-only fields leak into the decision object.
+        expect( ( decision as any ).tz ).to.equal( undefined );
+        expect( ( decision as any ).eip ).to.equal( undefined );
+    });
 
     it('OpenWeatherMap Lookup (Adjustment Method 0, Location 01002)', async () => {
         mockGeocoder();
