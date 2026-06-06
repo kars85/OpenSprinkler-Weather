@@ -92,6 +92,7 @@ Then `step()` is called with `params.kc = demandKc`, `params.referenceKc = refer
 - **rawData (conditional):** add `kc` and `kcSource` to the Water-Budget rawData **only when `kcSource && kcSource !== "budget"`** (i.e. a plant preset or override is actually in effect). When unconfigured, the rawData shape is unchanged → continuity. Apply this in **both** rawData builders: `buildRawDataFromDecision` (same-day + post-step record path) and the cold-start fallback object (`WaterBudgetAdjustmentMethod.ts:151-159`).
 - **Persistence:** because same-day re-polls rebuild rawData from the stored `DecisionRecord` (`:123-132`), `demandKc`/`kcSource` are read from the record (§5) — so same-day responses report the *same* coefficient that produced the stored scale, never a recomputed-from-current-env value.
 - **Legacy conversion:** extend the WaterBudget branch of `convertToLegacyFormat` (`weather.ts:133-138`, currently `eto/etc/p/bank/reason`) to also forward `kc` and `kcSource` when present, so legacy/simplified responses don't drop the new fields.
+- **Stale-hold responses unchanged (intentional):** the fail-open "hold last value" paths (weather unavailable `:95-100`, incomplete weather `:113-118`) return a simple rawData (`wp/scale/reason`) and do **not** go through `buildRawDataFromDecision`. Active-coefficient metadata is reported **only** for model-decision responses (built from a `DecisionRecord` / the post-step result); stale-hold responses remain as-is, with no `kc`/`kcSource`. This is intended — a held value did not run the model this request, so it has no live coefficient to report.
 
 ## 8. Affected files
 
@@ -111,7 +112,7 @@ Then `step()` is called with `params.kc = demandKc`, `params.referenceKc = refer
 Pure/where possible:
 - **`step` asymmetric:** with `kc=1.0, referenceKc=0.9`, dry-day scale = `round(100·eto·1.0/(refEto·0.9))` (demand kc now affects scale); with `kc==referenceKc`, scale/state match the pre-change formula exactly (continuity); `kc=NaN` ⇒ `fin` coerces to 0, no NaN in state.
 - **`step` records metadata:** `demandKc`/`kcSource` land in the `DecisionRecord`.
-- **Method-level:** `BUDGET_PLANT_TYPE="native"` yields a lower scale than unset (default `BUDGET_KC`) for the same weather; unset ⇒ rawData has no `kc`/`kcSource`; `BUDGET_CUSTOM_CROP_COEFFICIENT="abc"` (non-finite) falls back to `referenceKc`; same-day re-poll returns the stored `kc`/`kcSource` from history.
+- **Method-level:** `BUDGET_PLANT_TYPE="native"` yields a lower scale than unset (default `BUDGET_KC`) for the same weather; unset ⇒ rawData has no `kc`/`kcSource`; with **`BUDGET_PLANT_TYPE` unset**, `BUDGET_CUSTOM_CROP_COEFFICIENT="abc"` (non-finite) falls back to `referenceKc` (the dispatcher ignores the bad override, then — because no plant is set — uses the budget fallback); same-day re-poll returns the stored `kc`/`kcSource` from history.
 - **Legacy:** `convertToLegacyFormat` forwards `kc`/`kcSource` for the WaterBudget method when present.
 
 ## 10. Out of scope
