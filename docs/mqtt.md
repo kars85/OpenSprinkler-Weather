@@ -37,6 +37,8 @@ No manual sensor config needed — just point the service at the same broker HA 
 ## Notes
 
 - Watering follows the same daily cache as the HTTP API; weather is fetched fresh each interval.
+- `MQTT_RESTRICT=1` force-enables the rain skip for the published decision (same `RAIN_SKIP`
+  threshold, live + fail-open), equivalent to the firmware restriction bit.
 - A weather/compute failure for one section leaves that topic's last retained value intact and
   sets `status.ok=false`; the broker availability stays `online` (it reflects only the connection).
 - Credentials and API keys are never published or included in discovery, and are redacted in logs.
