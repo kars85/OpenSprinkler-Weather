@@ -1,0 +1,15 @@
+body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; color: #222; background: #f7f7f7; }
+h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+h2 { font-size: 1rem; margin: 1rem 0 .5rem; }
+.bar { display: flex; gap: .5rem; flex-wrap: wrap; }
+.bar input { padding: .4rem; border: 1px solid #ccc; border-radius: 4px; }
+.bar button { padding: .4rem .8rem; border: 0; border-radius: 4px; background: #2a7; color: #fff; cursor: pointer; }
+.error { color: #b00; min-height: 1.2em; margin: .5rem 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .5rem; }
+.card { background: #fff; border: 1px solid #e3e3e3; border-radius: 6px; padding: .5rem .6rem; display: flex; flex-direction: column; }
+.card .k { font-size: .7rem; color: #777; text-transform: uppercase; }
+.card .v { font-size: 1.1rem; font-weight: 600; }
+.chart svg { width: 100%; height: 120px; background: #fff; border: 1px solid #e3e3e3; border-radius: 6px; }
+.chart-axis { display: flex; justify-content: space-between; font-size: .7rem; color: #777; }
+.decisions table { width: 100%; border-collapse: collapse; background: #fff; }
+.decisions th, .decisions td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #eee; font-size: .85rem; }

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+	<title>OpenSprinkler Weather Dashboard</title>
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<header>
+		<h1>OpenSprinkler Weather</h1>
+		<div class="bar">
+			<input id="loc-input" placeholder="lat,lon or location" aria-label="Location">
+			<input id="method-input" type="number" min="0" max="4" aria-label="Adjustment method">
+			<button id="refresh-btn">Refresh</button>
+		</div>
+		<p id="error" class="error"></p>
+	</header>
+
+	<section id="cards" class="cards">
+		<div class="card"><span class="k">Scale</span><span class="v" id="card-scale">&mdash;</span></div>
+		<div class="card"><span class="k">Method</span><span class="v" id="card-method">&mdash;</span></div>
+		<div class="card"><span class="k">Skip</span><span class="v" id="card-skip">&mdash;</span></div>
+		<div class="card"><span class="k">Provider</span><span class="v" id="card-provider">&mdash;</span></div>
+		<div class="card"><span class="k">Temp</span><span class="v" id="card-temp">&mdash;</span></div>
+		<div class="card"><span class="k">Humidity</span><span class="v" id="card-humidity">&mdash;</span></div>
+		<div class="card"><span class="k">Wind</span><span class="v" id="card-wind">&mdash;</span></div>
+		<div class="card"><span class="k">Precip</span><span class="v" id="card-precip">&mdash;</span></div>
+		<div class="card"><span class="k">Rain bank</span><span class="v" id="card-rainbank">&mdash;</span></div>
+	</section>
+
+	<section class="chart">
+		<h2>Watering scale history</h2>
+		<svg id="history-chart" viewBox="0 0 300 80" preserveAspectRatio="none" role="img" aria-label="Watering scale history">
+			<polyline id="history-line" fill="none" stroke="#2a7" stroke-width="1.5" points=""></polyline>
+		</svg>
+		<div class="chart-axis"><span id="chart-min">&mdash;</span><span id="chart-max">&mdash;</span></div>
+	</section>
+
+	<section class="decisions">
+		<h2>Recent decisions</h2>
+		<table>
+			<thead><tr><th>Date</th><th>Scale</th><th>Reason</th></tr></thead>
+			<tbody id="decisions-body"></tbody>
+		</table>
+	</section>
+
+	<script src="format.js"></script>
+	<script src="app.js"></script>
+</body>
+</html>
