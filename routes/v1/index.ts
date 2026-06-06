@@ -4,9 +4,10 @@ import { AdjustmentOptions } from "../adjustmentMethods/AdjustmentMethod";
 import { getBudgetState } from "../adjustmentMethods/WaterBudgetAdjustmentMethod";
 import {
 	buildPwsFromParams, computeWateringDecision, getParameter,
-	redactLogString, resolveCoordinates, resolveWeatherProvider, WateringDecision
+	redactLogString, resolveCoordinates, resolveWeatherProvider
 } from "../weather";
 import { CodedError, ErrorCode, makeCodedError } from "../../errors";
+import { shapeBudgetResponse, shapeWateringResponse, shapeWeatherResponse } from "../api/shapers";
 
 /** Map a CodedError to an HTTP status + clean error code for the /v1 API. */
 function v1Status( errCode: ErrorCode ): { status: number; code: string } {
@@ -40,59 +41,8 @@ function resolvePwsOrThrow( adjustmentOptions: AdjustmentOptions ): PWS | undefi
 	return buildPwsFromParams( adjustmentOptions );
 }
 
-function shapeWateringResponse( d: WateringDecision ): any {
-	const raw = d.rawData || {};
-	return {
-		location: d.coordinates,
-		method: d.methodName,
-		methodName: d.methodName,
-		methodId: d.methodId,
-		scale: d.scale,
-		rainDelay: d.rainDelay,
-		skip: d.skip,
-		skipReason: d.skipReason !== undefined ? d.skipReason : null,
-		pwsBypassed: d.pwsBypassed,
-		weatherProvider: d.weatherProvider,
-		reason: raw.reason !== undefined ? raw.reason : null,
-		raw: d.rawData
-	};
-}
-
-function shapeWeatherResponse( coordinates: GeoCoordinates, weather: any ): any {
-	return {
-		location: coordinates,
-		weatherProvider: weather.weatherProvider,
-		temp: weather.temp,
-		humidity: weather.humidity,
-		wind: weather.wind,
-		precip: weather.precip,
-		minTemp: weather.minTemp,
-		maxTemp: weather.maxTemp,
-		description: weather.description,
-		icon: weather.icon
-	};
-}
-
 const BUDGET_HISTORY_CAP = 90;
 const BUDGET_HISTORY_DEFAULT = 30;
-
-function shapeBudgetResponse( coordinates: GeoCoordinates, state: any, limit: number ): any {
-	const history = ( state.history || [] ).slice( -limit ).map( ( r: any ) => {
-		const out: any = {
-			date: r.date, scale: r.scale, eto: r.eto, etc: r.etc,
-			effectiveRain: r.effectiveRain, rainBankAfter: r.rainBankAfter, reason: r.reason
-		};
-		if ( r.kcSource !== undefined ) { out.kc = r.demandKc; out.kcSource = r.kcSource; }
-		return out;
-	} );
-	return {
-		location: coordinates,
-		rainBank: state.rainBank,
-		lastUpdated: state.lastUpdated,
-		lastScale: state.lastScale,
-		history
-	};
-}
 
 export const v1Watering = async function ( req: express.Request, res: express.Response ): Promise< void > {
 	const loc = getParameter( req.query.loc );

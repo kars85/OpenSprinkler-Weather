@@ -82,4 +82,8 @@ app.listen( port, host, function() {
 	if (pws !== "none" ) {
 		console.log( "%s now listening for local weather stream", packageJson.description );
 	}
+
+	if ( process.env.MQTT_BROKER_URL ) {
+		require( "./mqtt/MqttPublisher" ).startMqttPublisher();
+	}
 } );
