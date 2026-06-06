@@ -7,6 +7,7 @@ import { CodedError, ErrorCode } from "../../errors";
 
 // Import enhanced forecast interfaces
 import { EnhancedWeatherProvider, ForecastEToData } from "../weatherProviders/local";
+import { resolveCropCoefficient } from "./PlantCoefficients";
 
 /**
  * Structural (duck-typed) capability check that ALSO narrows the type so the forecast block can
@@ -337,22 +338,26 @@ async function calculateEToWateringScale(
     if (enableCropCoefficient) {
         const avgTemp = (historicalEtoData.maxTemp + historicalEtoData.minTemp) / 2;
         const dayOfYear = moment.unix(historicalEtoData.periodStartTime).dayOfYear();
-        
-        const kcResult = TurfgrassManager.calculateCropCoefficient(
-            grassType,
-            grassVariety,
-            coordinates,
-            usdaZone,
-            avgTemp,
-            historicalEtoData.precip,
+
+        const kcResult = resolveCropCoefficient(
+            adjustmentOptions,
             dayOfYear,
-            managementLevel
+            () => TurfgrassManager.calculateCropCoefficient(
+                grassType,
+                grassVariety,
+                coordinates,
+                usdaZone,
+                avgTemp,
+                historicalEtoData.precip,
+                dayOfYear,
+                managementLevel
+            )
         );
-        
+
         cropCoefficient = kcResult.kc;
         cropFactors = kcResult.factors;
-        
-        console.log(`DEBUG: Crop coefficient calculated: ${cropCoefficient}`);
+
+        console.log(`DEBUG: Crop coefficient resolved: ${cropCoefficient} (source: ${cropFactors && cropFactors.source})`);
     }
 
     // Get irrigation efficiency
@@ -828,6 +833,8 @@ export interface EToScalingAdjustmentOptions extends AdjustmentOptions {
    enableCropCoefficient?: boolean;
    /** NEW: Custom crop coefficient override */
    customCropCoefficient?: number;
+   /** NEW: Named plant preset selecting a seasonal Kc curve (see PlantCoefficients). */
+   plantType?: string;
 }
 
 /** Data about the cloud coverage for a period of time. */
