@@ -179,9 +179,18 @@ export function convertToLegacyFormat(enhancedData: any, adjustmentMethod: Adjus
 				legacyData.rawData.pwsBypassReason = rawDataSource.pwsBypassReason;
 			}
 		}
+		// Keep rawData within the firmware's findKeyVal buffer: TMP_BUFFER_SIZE is 320, so the rawData
+		// value must stay < 319 bytes or getweather_callback (weather.cpp) silently drops the whole
+		// field. Trim the verbose optional strings (least-essential first) until it fits; keep flags.
+		for ( const trimKey of [ "skipReason", "pwsBypassReason", "reason" ] ) {
+			if ( JSON.stringify( legacyData.rawData ).length < 300 ) break;
+			if ( legacyData.rawData[ trimKey ] !== undefined ) delete legacyData.rawData[ trimKey ];
+		}
 	} else {
 		debugLog("DEBUG convertToLegacyFormat: enhancedData.rawData is missing.");
 	}
+	// Top-level restriction flag so the firmware can label/notify it (wt_restricted), in addition to scale=0.
+	if ( enhancedData.restricted ) legacyData.restricted = enhancedData.restricted;
 	debugLog("DEBUG convertToLegacyFormat: Legacy format conversion complete. Output:", JSON.stringify(legacyData));
 	return legacyData;
 }
@@ -293,6 +302,7 @@ export interface WateringDecision {
 	skipReason?: string;
 	servedFallback: boolean;
 	pwsBypassed: boolean;
+	restricted: boolean;
 }
 
 /**
@@ -357,7 +367,10 @@ export async function computeWateringDecision( input: WateringDecisionInput ): P
 		skip: !!rawData.skip,
 		skipReason: rawData.skipReason,
 		servedFallback: !!( weatherProvider as any ).servedFallback,
-		pwsBypassed: !!( weatherProvider as any ).pwsBypassed
+		pwsBypassed: !!( weatherProvider as any ).pwsBypassed,
+		// The restriction bit (bit 7) is unified with the rain skip: "restricted" = the controller
+		// asked for the restriction AND a skip actually fired. Lets the firmware label/notify it.
+		restricted: checkRestrictions && !!rawData.skip
 	};
 }
 
@@ -485,6 +498,7 @@ export const getWateringData = async function( req: express.Request, res: expres
 		sunset: timeData.sunset,
 		eip: ipToInt( remoteAddress ),
 		rawData: decision.rawData,
+		restricted: decision.restricted ? 1 : undefined,
 		errCode: 0
 	};
 	

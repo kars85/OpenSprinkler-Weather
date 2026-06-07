@@ -57,6 +57,29 @@ describe( 'convertToLegacyFormat WaterBudget kc passthrough', () => {
 	} );
 } );
 
+describe( 'convertToLegacyFormat restricted passthrough', () => {
+	it( 'emits top-level restricted when set', () => {
+		const out: any = convertToLegacyFormat( { scale: 0, restricted: 1, errCode: 0, rawData: { wp: 'OWM', skip: 1 } }, ManualAdjustmentMethod );
+		expect( out.restricted ).to.equal( 1 );
+	} );
+	it( 'omits restricted when not set (continuity)', () => {
+		const out: any = convertToLegacyFormat( { scale: 100, errCode: 0, rawData: { wp: 'OWM' } }, ManualAdjustmentMethod );
+		expect( out.restricted ).to.equal( undefined );
+	} );
+} );
+
+describe( 'convertToLegacyFormat rawData length guard', () => {
+	it( 'trims verbose rawData strings to stay within the firmware buffer (<319 bytes), keeping essential flags', () => {
+		const longReason = 'rain: ' + 'x'.repeat( 400 ) + 'in at or above 0.1in';
+		const out: any = convertToLegacyFormat(
+			{ scale: 0, errCode: 0, rawData: { wp: 'OWM', skip: 1, skipReason: longReason } },
+			ManualAdjustmentMethod
+		);
+		expect( JSON.stringify( out.rawData ).length ).to.be.lessThan( 319 );
+		expect( out.rawData.skip ).to.equal( 1 );
+	} );
+} );
+
 describe( 'resolveWeatherProvider', () => {
 	afterEach( () => {
 		delete process.env.WEATHER_PROVIDER_FALLBACKS;
@@ -215,6 +238,7 @@ describe('Watering Data', () => {
         expect( body.scale ).to.equal( 0 );
         expect( body.rawData.skip ).to.equal( 1 );
         expect( body.rawData.skipReason ).to.be.a('string').and.contain('rain');
+        expect( body.restricted ).to.equal( 1 ); // restriction bit + skip -> top-level restricted (firmware wt_restricted)
     });
 
     it('applies the rain restriction LIVE over a cached method result (not a cached 0)', async () => {
