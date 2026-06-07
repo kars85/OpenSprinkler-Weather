@@ -102,6 +102,7 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 			throw "Necessary field(s) were missing from weather information returned by AccuWeather.";
 		}
 
+		const dayPrecip = daily[ 0 ].Day.TotalLiquid ? Number( daily[ 0 ].Day.TotalLiquid.Value ) : NaN;
 		const weather: WeatherData = {
 			weatherProvider: "AccuWeather",
 			temp: Math.floor( current.Temperature.Imperial.Value ),
@@ -114,7 +115,7 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 			city: locationData.EnglishName,
 			minTemp: Math.floor( daily[ 0 ].Temperature.Minimum.Value ),
 			maxTemp: Math.floor( daily[ 0 ].Temperature.Maximum.Value ),
-			precip: daily[ 0 ].Day.PrecipitationIntensity,
+			precip: Number.isFinite( dayPrecip ) ? dayPrecip : NaN,
 			forecast: []
 		};
 

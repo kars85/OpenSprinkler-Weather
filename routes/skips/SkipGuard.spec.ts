@@ -110,12 +110,18 @@ describe( "SkipGuard.applyWeatherSkips forceRain", () => {
 	beforeEach( () => __clearSkipWeatherMemo() );
 	const base = { scale: 80, rawData: { wp: "OWM" } };
 
-	it( "forces a rain skip on a wet day even when SKIP_RAIN is unset", async () => {
-		const p = new StubProvider( { precip: 0.5, minTemp: 60, temp: 65, wind: 3 } );
+	it( "forces a rain skip for AccuWeather-shaped numeric precip even when SKIP_RAIN is unset", async () => {
+		const p = new StubProvider( { weatherProvider: "AccuWeather", precip: 0.5, minTemp: 60, temp: 65, wind: 3 } );
 		const out = await applyWeatherSkips( base, p, coords, undefined, {} as any, 1000, true );
 		expect( out.scale ).to.equal( 0 );
 		expect( out.rawData.skip ).to.equal( 1 );
 		expect( out.rawData.skipReason ).to.contain( "rain" );
+	} );
+
+	it( "fails open for AccuWeather-shaped string precip", async () => {
+		const p = new StubProvider( { weatherProvider: "AccuWeather", precip: "Heavy" as any, minTemp: 60, temp: 65, wind: 3 } );
+		const out = await applyWeatherSkips( base, p, coords, undefined, {} as any, 1000, true );
+		expect( out ).to.equal( base );
 	} );
 
 	it( "no-ops on a dry day under forceRain", async () => {
