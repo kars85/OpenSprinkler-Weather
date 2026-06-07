@@ -50,7 +50,7 @@
 			budgetEmpty = false;
 			rainBank = num( b.rainBank );
 			for ( var i = 0; i < b.history.length; i++ ) {
-				var r = b.history[ i ];
+				var r = b.history[ i ] || {};
 				history.push( isFiniteNum( r.scale ) ? r.scale : 0 );
 				decisions.push( { date: r.date || "", scale: num( r.scale ), reason: r.reason || "" } );
 			}

@@ -8,11 +8,22 @@
 	function unit( v, u ) { return v === null ? null : v + u; }
 
 	function fetchJSON( url ) {
-		return fetch( url, { cache: "no-store" } ).then( function ( res ) {
+		var timeout;
+		var request = fetch( url, { cache: "no-store" } ).then( function ( res ) {
 			return res.json().catch( function () { return null; } ).then( function ( body ) {
 				if ( !res.ok ) return { error: ( body && body.error ) || { code: res.status, message: "HTTP " + res.status } };
 				return body || { error: { message: "empty response" } };
 			} );
+		} );
+		var timed = new Promise( function ( resolve, reject ) {
+			timeout = setTimeout( function () { reject( new Error( "request timed out" ) ); }, 15000 );
+		} );
+		return Promise.race( [ request, timed ] ).then( function ( body ) {
+			clearTimeout( timeout );
+			return body;
+		}, function ( err ) {
+			clearTimeout( timeout );
+			throw err;
 		} );
 	}
 
@@ -30,7 +41,7 @@
 
 	function renderChart( history ) {
 		var svg = $( "history-chart" );
-		var vb = svg.viewBox.baseVal;
+		var vb = ( svg && svg.viewBox && svg.viewBox.baseVal ) || {};
 		var r = F.buildHistoryPath( history, vb.width || 300, vb.height || 80 );
 		$( "history-line" ).setAttribute( "points", r.points );
 		setText( $( "chart-min" ), history.length ? r.min : "" );
@@ -66,7 +77,10 @@
 		Promise.all( [ fetchJSON( urls.watering ), fetchJSON( urls.weather ), fetchJSON( urls.budget ) ] ).then( function ( res ) {
 			var vm = F.buildViewModel( { watering: res[ 0 ], weather: res[ 1 ], budget: res[ 2 ] } );
 			renderCards( vm ); renderChart( vm.history ); renderDecisions( vm.decisions );
-			if ( vm.watering.error ) setText( $( "error" ), "Watering: " + vm.watering.error );
+			var errors = [];
+			if ( vm.watering.error ) errors.push( "Watering: " + vm.watering.error );
+			if ( vm.weather.error ) errors.push( "Weather: " + vm.weather.error );
+			if ( errors.length ) setText( $( "error" ), errors.join( " " ) );
 		} ).catch( function () {
 			setText( $( "error" ), "Couldn't reach the service." );
 		} ).then( function () { inFlight = false; } );

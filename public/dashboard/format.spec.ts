@@ -52,6 +52,17 @@ describe( "dashboard format.buildViewModel", () => {
 		const vm = F.buildViewModel( { watering: { error: { message: "bad loc" } }, weather: {}, budget: null } );
 		expect( vm.watering.error ).to.equal( "bad loc" );
 	} );
+	it( "tolerates null history entries", () => {
+		const vm = F.buildViewModel( {
+			watering: { scale: 100 },
+			weather: {},
+			budget: { rainBank: 0.25, history: [ null, { date: "2024-07-15", scale: 80, reason: "dry" } ] }
+		} );
+		expect( vm.history ).to.deep.equal( [ 0, 80 ] );
+		expect( vm.decisions[ 0 ] ).to.deep.equal( { date: "", scale: null, reason: "" } );
+		expect( vm.decisions[ 1 ].reason ).to.equal( "dry" );
+		expect( vm.budgetEmpty ).to.equal( false );
+	} );
 } );
 
 describe( "dashboard format.buildHistoryPath", () => {
