@@ -1,10 +1,7 @@
 import { WeatherData } from "../../types";
+import { asFiniteNumber } from "./brandedNumbers";
 
 const NUMERIC_WEATHER_DATA_FIELDS = [ "temp", "humidity", "wind", "minTemp", "maxTemp", "precip" ];
-
-function isNum( x: any ): x is number {
-	return typeof x === "number" && Number.isFinite( x );
-}
 
 function describeValue( value: any ): string {
 	if ( typeof value === "number" && Number.isNaN( value ) ) return "NaN";
@@ -25,7 +22,7 @@ export function normalizeWeatherData( provider: string, raw: WeatherData ): Weat
 
 	for ( const field of NUMERIC_WEATHER_DATA_FIELDS ) {
 		const value = ( raw as any )[ field ];
-		if ( isNum( value ) ) {
+		if ( asFiniteNumber( value ) ) {
 			( normalized as any )[ field ] = value;
 		} else if ( value === undefined || value === null ) {
 			( normalized as any )[ field ] = undefined;
