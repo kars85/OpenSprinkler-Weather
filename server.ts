@@ -5,6 +5,8 @@ import * as express from "express";
 import * as cors from "cors";
 import { default as helmet } from "helmet";
 import { rateLimit } from "express-rate-limit";
+import * as path from "path";
+import * as fs from "fs";
 
 import * as weather from "./routes/weather";
 import * as local from "./routes/weatherProviders/local";
@@ -68,6 +70,20 @@ app.options( /baselineETo/, cors() );
 app.get( /baselineETo/, cors(), baselineETo.getBaselineETo );
 
 app.use( "/v1", cors(), v1Router );
+
+// Serve the static dashboard (zero-build). Resolve across run modes (cwd, compiled js/, ts-node).
+const dashboardCandidates = [
+	path.join( process.cwd(), "public", "dashboard" ),
+	path.join( __dirname, "..", "public", "dashboard" ),
+	path.join( __dirname, "public", "dashboard" )
+];
+const dashboardDir = dashboardCandidates.filter( function ( d ) { return fs.existsSync( d ); } )[ 0 ];
+if ( dashboardDir ) {
+	app.use( "/dashboard", cors(), express.static( dashboardDir, { dotfiles: "deny", index: "index.html" } ) );
+	console.log( "Dashboard available at /dashboard (from %s)", dashboardDir );
+} else {
+	console.warn( "Dashboard assets not found (looked in: %s); /dashboard disabled.", dashboardCandidates.join( ", " ) );
+}
 
 // Handle 404 error
 app.use( function( req, res ) {
