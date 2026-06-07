@@ -4,6 +4,7 @@ import * as jwt from "jsonwebtoken";
 import { GeoCoordinates, WeatherData, ZimmermanWateringData, PWS } from "../../types"; // Added PWS for completeness, though not used by Apple provider directly
 import { httpJSONRequest } from "../weather";
 import { WeatherProvider } from "./WeatherProvider";
+import { normalizeWeatherData } from "./normalizeWeatherData";
 import { approximateSolarRadiation, CloudCoverInfo, EToData } from "../adjustmentMethods/EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
 
@@ -158,7 +159,7 @@ export default class AppleWeatherProvider extends WeatherProvider {
 			});
 		}
 
-		return weather;
+		return normalizeWeatherData( "Apple", weather );
 	}
 
 	public async getEToData(coordinates: GeoCoordinates): Promise<EToData> {

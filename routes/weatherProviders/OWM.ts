@@ -1,6 +1,7 @@
 import { GeoCoordinates, PWS, WeatherData, ZimmermanWateringData } from "../../types";
 import { httpJSONRequest, keyToUse } from "../weather";
 import { WeatherProvider } from "./WeatherProvider";
+import { normalizeWeatherData } from "./normalizeWeatherData";
 import { approximateSolarRadiation, CloudCoverInfo, EToData } from "../adjustmentMethods/EToAdjustmentMethod";
 import * as moment from "moment";
 import * as geoTZ from "geo-tz";
@@ -106,7 +107,7 @@ export default class OWMWeatherProvider extends WeatherProvider {
 			});
 		}
 
-		return weather;
+		return normalizeWeatherData( "OWM", weather );
 	}
 
 	async getEToData(coordinates: GeoCoordinates, pws?: PWS): Promise<EToData> {

@@ -3,6 +3,7 @@ import * as moment from "moment-timezone";
 import { GeoCoordinates, WeatherData, ZimmermanWateringData } from "../../types";
 import { httpJSONRequest } from "../weather";
 import { WeatherProvider } from "./WeatherProvider";
+import { normalizeWeatherData } from "./normalizeWeatherData";
 import { approximateSolarRadiation, CloudCoverInfo, EToData } from "../adjustmentMethods/EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
 
@@ -153,7 +154,7 @@ export default class DWDWeatherProvider extends WeatherProvider {
 			current.weather.condition,
 			current.sources[0].station_name);
 
-		return weather;
+		return normalizeWeatherData( "DWD", weather );
 	}
 
 	public async getEToData( coordinates: GeoCoordinates ): Promise< EToData > {

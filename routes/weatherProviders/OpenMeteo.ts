@@ -4,6 +4,7 @@ import * as geoTZ from "geo-tz";
 import { GeoCoordinates, WeatherData, ZimmermanWateringData, PWS } from "../../types";
 import { httpJSONRequest } from "../weather";
 import { WeatherProvider } from "./WeatherProvider";
+import { normalizeWeatherData } from "./normalizeWeatherData";
 import { approximateSolarRadiation, CloudCoverInfo, EToData } from "../adjustmentMethods/EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
 
@@ -167,7 +168,7 @@ export default class OpenMeteoWeatherProvider extends EnhancedWeatherProvider {
 			weather.humidity,
 			this.mph2kmh(weather.wind));*/
 
-		return weather;
+		return normalizeWeatherData( "OpenMeteo", weather );
 	}
 
 	public async getEToData( coordinates: GeoCoordinates ): Promise< EToData > {

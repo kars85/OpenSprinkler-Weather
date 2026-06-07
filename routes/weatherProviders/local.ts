@@ -4,6 +4,7 @@ import * as fs from "fs";
 
 import { GeoCoordinates, WeatherData, ZimmermanWateringData, PWS } from "../../types";
 import { WeatherProvider } from "./WeatherProvider";
+import { normalizeWeatherData } from "./normalizeWeatherData";
 import { EToData, approximateSolarRadiation, CloudCoverInfo } from "../adjustmentMethods/EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
 import { debugLog, httpJSONRequest } from "../weather";
@@ -195,7 +196,7 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 			forecast: []
 		};
 		debugLog("DEBUG: LocalWeatherProvider.getWeatherData RETURNING result:", JSON.stringify(weather));
-		return weather;
+		return normalizeWeatherData( "local", weather );
 	}
 
 	public async getWateringData(coordinates: GeoCoordinates): Promise<ZimmermanWateringData> {

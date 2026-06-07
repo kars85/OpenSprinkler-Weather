@@ -3,6 +3,7 @@ import * as moment from "moment-timezone";
 import { GeoCoordinates, PWS, WeatherData, ZimmermanWateringData } from "../../types";
 import { httpJSONRequest, keyToUse } from "../weather";
 import { WeatherProvider } from "./WeatherProvider";
+import { normalizeWeatherData } from "./normalizeWeatherData";
 import { approximateSolarRadiation, CloudCoverInfo, EToData } from "../adjustmentMethods/EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
 
@@ -129,7 +130,7 @@ export default class AccuWeatherWeatherProvider extends WeatherProvider {
 			} );
 		}
 
-		return weather;
+		return normalizeWeatherData( "AccuWeather", weather );
 	}
 
 	public async getEToData( coordinates: GeoCoordinates, pws?: PWS ): Promise< EToData > {
