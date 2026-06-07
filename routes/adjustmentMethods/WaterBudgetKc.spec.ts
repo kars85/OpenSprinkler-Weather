@@ -11,6 +11,12 @@ class StubProvider extends WeatherProvider {
 	public async getEToData(): Promise< EToData > { return this.data; }
 }
 
+class ThrowProvider extends WeatherProvider {
+	public async getWateringData(): Promise< ZimmermanWateringData > { throw new Error( "n/a" ); }
+	public async getWeatherData(): Promise< WeatherData > { throw new Error( "n/a" ); }
+	public async getEToData(): Promise< EToData > { throw new Error( "offline" ); }
+}
+
 function etoData( over: Partial<EToData> = {} ): EToData {
 	return {
 		weatherProvider: "mock", periodStartTime: 1557705600,
@@ -19,6 +25,10 @@ function etoData( over: Partial<EToData> = {} ): EToData {
 	};
 }
 const opts = { provider: "mock" } as any;
+const dryHighDemand = etoData( {
+	minTemp: 82, maxTemp: 118, minHumidity: 8, maxHumidity: 35,
+	solarRadiation: 11, windSpeed: 18, precip: 0
+} );
 
 function withEnv( vars: { [ k: string ]: string | undefined }, fn: () => Promise< void > ): Promise< void > {
 	const saved: { [ k: string ]: string | undefined } = {};
@@ -106,7 +116,102 @@ describe( "WaterBudget per-plant Kc", () => {
 			expect( res.rawData.kc ).to.equal( undefined );
 			expect( res.rawData.kcSource ).to.equal( undefined );
 			expect( res.rawData.budgetKcApplied ).to.equal( undefined );
+			expect( res.rawData.budgetMaxScaleApplied ).to.equal( undefined );
 			expect( res.rawData.etc ).to.be.closeTo( res.rawData.eto * 0.9, 0.02 );
+		} );
+	} );
+
+	it( "applies budgetMaxScale as a returned-scale clamp without mutating persisted state", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: undefined, BUDGET_KC: "0.9" }, async () => {
+			const coords: [ number, number ] = [ 42.61, -72.61 ];
+			const res: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetMaxScale: 1 } as any, coords, new StubProvider( dryHighDemand )
+			);
+			const state = await getBudgetState( coords );
+			const cached: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				opts, coords, new StubProvider( etoData( { minTemp: 40, maxTemp: 50, precip: 3 } ) )
+			);
+
+			expect( state!.lastScale ).to.be.greaterThan( 1 );
+			expect( state!.history[ 0 ].scale ).to.equal( state!.lastScale );
+			expect( res.scale ).to.equal( 1 );
+			expect( res.rawData.scale ).to.equal( state!.lastScale );
+			expect( res.rawData.budgetMaxScale ).to.equal( 1 );
+			expect( res.rawData.budgetMaxScaleApplied ).to.equal( true );
+			expect( cached.scale ).to.equal( state!.lastScale );
+			expect( cached.rawData.budgetMaxScaleApplied ).to.equal( undefined );
+		} );
+	} );
+
+	it( "tightens same-day cached budgetMaxScale downward but never loosens", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: undefined, BUDGET_KC: "0.9" }, async () => {
+			const coords: [ number, number ] = [ 42.62, -72.62 ];
+			const first: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				opts, coords, new StubProvider( dryHighDemand )
+			);
+			expect( first.scale ).to.be.greaterThan( 10 );
+
+			const lowerMax = first.scale - 5;
+			const lower: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetMaxScale: lowerMax } as any, coords, new StubProvider( etoData( { minTemp: 40, maxTemp: 50, precip: 3 } ) )
+			);
+			const higher: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetMaxScale: first.scale + 50 } as any, coords, new StubProvider( etoData( { minTemp: 40, maxTemp: 50, precip: 3 } ) )
+			);
+			const state = await getBudgetState( coords );
+
+			expect( lower.scale ).to.equal( lowerMax );
+			expect( lower.rawData.scale ).to.equal( first.scale );
+			expect( lower.rawData.budgetMaxScaleApplied ).to.equal( true );
+			expect( higher.scale ).to.equal( first.scale );
+			expect( higher.rawData.budgetMaxScaleApplied ).to.equal( false );
+			expect( state!.history.length ).to.equal( 1 );
+			expect( state!.lastScale ).to.equal( first.scale );
+		} );
+	} );
+
+	it( "ignores junk or absent budgetMaxScale values", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: undefined, BUDGET_KC: "0.9" }, async () => {
+			for ( const testCase of [
+				{ value: "", coords: [ 42.63, -72.63 ] as [ number, number ] },
+				{ value: false, coords: [ 42.64, -72.64 ] as [ number, number ] },
+				{ value: NaN, coords: [ 42.65, -72.65 ] as [ number, number ] }
+			] ) {
+				const res: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+					{ ...opts, budgetMaxScale: testCase.value } as any, testCase.coords, new StubProvider( dryHighDemand )
+				);
+				const state = await getBudgetState( testCase.coords );
+				expect( res.scale ).to.equal( state!.lastScale );
+				expect( res.rawData.budgetMaxScale ).to.equal( undefined );
+				expect( res.rawData.budgetMaxScaleApplied ).to.equal( undefined );
+			}
+		} );
+	} );
+
+	it( "applies budgetMaxScale downward on stale hold returns", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: undefined, BUDGET_KC: "0.9" }, async () => {
+			const incompleteCoords: [ number, number ] = [ 42.66, -72.66 ];
+			const offlineCoords: [ number, number ] = [ 42.67, -72.67 ];
+			await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, incompleteCoords, new StubProvider( dryHighDemand ) );
+			await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, offlineCoords, new StubProvider( dryHighDemand ) );
+
+			const incomplete: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetMaxScale: 1 } as any, incompleteCoords, new StubProvider( etoData( { precip: NaN } ) )
+			);
+			const offline: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetMaxScale: 1 } as any, offlineCoords, new ThrowProvider()
+			);
+			const incompleteState = await getBudgetState( incompleteCoords );
+			const offlineState = await getBudgetState( offlineCoords );
+
+			for ( const res of [ incomplete, offline ] ) {
+				expect( res.scale ).to.equal( 1 );
+				expect( res.rawData.budgetMaxScale ).to.equal( 1 );
+				expect( res.rawData.budgetMaxScaleApplied ).to.equal( true );
+				expect( res.rawData.reason.toLowerCase() ).to.contain( "stale" );
+			}
+			expect( incompleteState!.lastScale ).to.be.greaterThan( 1 );
+			expect( offlineState!.lastScale ).to.be.greaterThan( 1 );
 		} );
 	} );
 

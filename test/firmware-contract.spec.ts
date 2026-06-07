@@ -82,6 +82,32 @@ describe( "firmware legacy contract guard", () => {
 		expect( out.rawData.pwsBypassed ).to.equal( 1 );
 	} );
 
+	it( "keeps WaterBudget late-lock observability under the firmware rawData buffer", () => {
+		const out = legacy( WaterBudgetAdjustmentMethod, {
+			scale: 50,
+			rawData: {
+				wp: "WaterBudget",
+				scale: 120,
+				eto: 0.18,
+				etc: 0.05,
+				p: 0,
+				bank: 0,
+				reason: "Scale 120%: Kc locked for today; applied 0.3.",
+				kc: 0.3,
+				kcSource: "override-budget",
+				budgetKcApplied: false,
+				budgetKcRequested: 0.8,
+				budgetKcLockedForToday: true,
+				budgetMaxScale: 50,
+				budgetMaxScaleApplied: true
+			}
+		} );
+		expect( JSON.stringify( out.rawData ).length ).to.be.lessThan( RAWDATA_FIRMWARE_LIMIT );
+		expect( out.rawData.reason ).to.contain( "locked for today" );
+		expect( out.rawData.budgetKcRequested ).to.equal( 0.8 );
+		expect( out.rawData.budgetMaxScaleApplied ).to.equal( true );
+	} );
+
 	it( "emits restricted only when set, as 0/1 (firmware wt_restricted)", () => {
 		expect( legacy( ManualAdjustmentMethod, { scale: 0, restricted: 1 } ).restricted ).to.equal( 1 );
 		expect( legacy( ManualAdjustmentMethod ).restricted ).to.equal( undefined );

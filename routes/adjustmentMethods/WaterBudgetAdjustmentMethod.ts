@@ -28,6 +28,15 @@ function optNum( value: any, fallback: number ): number {
 	return Number.isFinite( v ) && v > 0 ? v : fallback;
 }
 
+function optPositiveNum( value: any ): number | undefined {
+	const v = Number( value );
+	return Number.isFinite( v ) && v > 0 ? v : undefined;
+}
+
+function clampDown( scale: number, mx: number | undefined ): number {
+	return ( typeof mx === "number" && Number.isFinite( mx ) && mx > 0 ) ? Math.min( scale, mx ) : scale;
+}
+
 function resolveParams(): BudgetParams {
 	const baseKc = envNum( "BUDGET_KC", 0.9 );
 	return {
@@ -86,13 +95,23 @@ function buildRawDataFromDecision( weatherProvider: string, scale: number, recor
 	return raw;
 }
 
+function withBudgetMaxScaleFlag( rawData: any, heldScale: number, overrideMaxScale: number | undefined ): any {
+	if ( overrideMaxScale === undefined ) return rawData;
+	const clampedScale = clampDown( heldScale, overrideMaxScale );
+	return {
+		...rawData,
+		budgetMaxScale: round( overrideMaxScale, 2 ),
+		budgetMaxScaleApplied: clampedScale < heldScale
+	};
+}
+
 function withLateBudgetKcFlag( rawData: any, requestedKc: number, appliedKc: number | undefined ): any {
 	return {
 		...rawData,
 		budgetKcApplied: false,
 		budgetKcRequested: round( requestedKc, 2 ),
 		budgetKcLockedForToday: true,
-		reason: `${ rawData.reason || `Scale ${ rawData.scale }%: cached WaterBudget result.` } Budget Kc override locked for today; applied Kc ${ appliedKc === undefined ? "unknown" : round( appliedKc, 2 ) } remains in effect until the next advancing poll.`
+		reason: `Scale ${ rawData.scale }%: Kc locked for today; applied ${ appliedKc === undefined ? "unknown" : round( appliedKc, 2 ) }.`
 	};
 }
 
@@ -105,6 +124,7 @@ async function calculateWaterBudgetScale(
 	const params = resolveParams();
 	const elevation = optNum( ( adjustmentOptions as EToScalingAdjustmentOptions ).elevation, envNum( "BUDGET_ELEVATION", 600 ) );
 	const overrideKc = clampKc( adjustmentOptions.budgetKc );
+	const overrideMaxScale = optPositiveNum( adjustmentOptions.budgetMaxScale );
 	const key = stateKey( coordinates );
 
 	let etoData: EToData;
@@ -113,9 +133,14 @@ async function calculateWaterBudgetScale(
 	} catch ( err ) {
 		const prev = await safeGet( key );
 		if ( prev ) {
+			const returnedScale = clampDown( prev.lastScale, overrideMaxScale );
 			return {
-				scale: prev.lastScale,
-				rawData: { wp: "WaterBudget", scale: prev.lastScale, reason: `Scale ${ prev.lastScale }%: weather unavailable, holding last value (stale).` },
+				scale: returnedScale,
+				rawData: withBudgetMaxScaleFlag(
+					{ wp: "WaterBudget", scale: prev.lastScale, reason: `Scale ${ prev.lastScale }%: weather unavailable, holding last value (stale).` },
+					prev.lastScale,
+					overrideMaxScale
+				),
 				wateringData: { weatherProvider: "WaterBudget" as any, precip: 0 }
 			};
 		}
@@ -131,9 +156,14 @@ async function calculateWaterBudgetScale(
 	// rain bank. Hold the last scale if we have prior state, else surface a coded error.
 	if ( !Number.isFinite( eto ) || !Number.isFinite( etoData.precip ) ) {
 		if ( prev ) {
+			const returnedScale = clampDown( prev.lastScale, overrideMaxScale );
 			return {
-				scale: prev.lastScale,
-				rawData: { wp: "WaterBudget", scale: prev.lastScale, reason: `Scale ${ prev.lastScale }%: incomplete weather data, holding last value (stale).` },
+				scale: returnedScale,
+				rawData: withBudgetMaxScaleFlag(
+					{ wp: "WaterBudget", scale: prev.lastScale, reason: `Scale ${ prev.lastScale }%: incomplete weather data, holding last value (stale).` },
+					prev.lastScale,
+					overrideMaxScale
+				),
 				wateringData: etoData
 			};
 		}
@@ -143,12 +173,14 @@ async function calculateWaterBudgetScale(
 	if ( prev && prev.lastUpdated === today ) {
 		const last = prev.history[ prev.history.length - 1 ];
 		if ( last ) {
-			const rawData = buildRawDataFromDecision( etoData.weatherProvider, prev.lastScale, last );
+			let rawData = buildRawDataFromDecision( etoData.weatherProvider, prev.lastScale, last );
 			const lateBudgetKc = overrideKc !== undefined
 				&& ( last.demandKc === undefined || Math.abs( overrideKc - last.demandKc ) > 0.005 );
+			if ( lateBudgetKc ) rawData = withLateBudgetKcFlag( rawData, overrideKc, last.demandKc );
+			rawData = withBudgetMaxScaleFlag( rawData, prev.lastScale, overrideMaxScale );
 			return {
-				scale: prev.lastScale,
-				rawData: lateBudgetKc ? withLateBudgetKcFlag( rawData, overrideKc, last.demandKc ) : rawData,
+				scale: clampDown( prev.lastScale, overrideMaxScale ),
+				rawData,
 				wateringData: etoData
 			};
 		}
@@ -187,15 +219,16 @@ async function calculateWaterBudgetScale(
 	} );
 	await safeSet( key, state );
 	const last = state.history[ state.history.length - 1 ];
+	const returnedScale = clampDown( scale, overrideMaxScale );
 
 	return {
-		scale,
+		scale: returnedScale,
 		rawData: last
-			? {
+			? withBudgetMaxScaleFlag( {
 				...buildRawDataFromDecision( etoData.weatherProvider, scale, last ),
 				...( kcSource === "override-budget" ? { budgetKcApplied: true } : {} )
-			}
-			: ( () => {
+			}, scale, overrideMaxScale )
+			: withBudgetMaxScaleFlag( ( () => {
 				const raw: any = {
 					wp: etoData.weatherProvider,
 					scale,
@@ -208,7 +241,7 @@ async function calculateWaterBudgetScale(
 				if ( kcSource && kcSource !== "budget" ) { raw.kc = round( demandKc, 2 ); raw.kcSource = kcSource; }
 				if ( kcSource === "override-budget" ) raw.budgetKcApplied = true;
 				return raw;
-			} )(),
+			} )(), scale, overrideMaxScale ),
 		wateringData: etoData
 	};
 }

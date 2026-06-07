@@ -164,6 +164,9 @@ export function convertToLegacyFormat(enhancedData: any, adjustmentMethod: Adjus
 				legacyData.rawData.kc = rawDataSource.kc;
 				legacyData.rawData.kcSource = rawDataSource.kcSource;
 			}
+			for ( const k of [ "budgetKcApplied", "budgetKcRequested", "budgetKcLockedForToday", "budgetMaxScale", "budgetMaxScaleApplied" ] ) {
+				if ( rawDataSource[ k ] !== undefined ) legacyData.rawData[ k ] = rawDataSource[ k ];
+			}
 		}
 		// Universal passthrough for cross-cutting weather-skip metadata (applies to ALL methods).
 		if ( rawDataSource.skip ) {
