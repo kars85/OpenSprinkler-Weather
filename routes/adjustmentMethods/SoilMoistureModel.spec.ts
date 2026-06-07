@@ -102,3 +102,40 @@ describe( "SoilMoistureModel", () => {
 		expect( Number.isFinite( r2.state.rainBank ) ).to.equal( true );
 	} );
 } );
+
+describe( "SoilMoistureModel asymmetric kc", () => {
+	const asymParams = ( kc: number, referenceKc: number ): BudgetParams => ( {
+		kc, referenceKc, maxScale: 200, runoffFactor: 1.0, rainBankCapDays: 14, gapResetDays: 2
+	} );
+	const dryInput = ( over: any = {} ) => ( {
+		today: "2019-07-15", eto: 0.25, precip: 0, referenceEto: 0.25, resolvedLocation: undefined, ...over
+	} );
+
+	it( "demand kc scales the dry-day scale when it differs from reference kc", () => {
+		expect( step( undefined, dryInput({ params: asymParams( 1.0, 0.9 ) }) ).scale ).to.equal( 111 ); // 100*1.0/0.9
+		expect( step( undefined, dryInput({ params: asymParams( 0.3, 0.9 ) }) ).scale ).to.equal( 33 );  // 100*0.3/0.9
+	} );
+
+	it( "reproduces the symmetric result when demand kc == reference kc (continuity)", () => {
+		const r = step( undefined, { today: "2019-07-15", eto: 0.30, precip: 0, referenceEto: 0.20, resolvedLocation: undefined, params: asymParams( 0.9, 0.9 ) } );
+		expect( r.scale ).to.equal( 150 ); // kc cancels: 100*0.30/0.20
+	} );
+
+	it( "treats a missing referenceKc as equal to kc (backward compatible)", () => {
+		const noRef = step( undefined, { today: "2019-07-15", eto: 0.30, precip: 0, referenceEto: 0.20, resolvedLocation: undefined, params: { kc: 0.7, maxScale: 200, runoffFactor: 1.0, rainBankCapDays: 14, gapResetDays: 2 } } );
+		expect( noRef.scale ).to.equal( 150 ); // kc cancels, same as symmetric
+	} );
+
+	it( "coerces a non-finite demand kc to 0 demand (no NaN in state)", () => {
+		const r = step( undefined, dryInput({ params: asymParams( NaN as any, 0.9 ) }) );
+		expect( r.scale ).to.equal( 0 );
+		expect( Number.isFinite( r.state.rainBank ) ).to.equal( true );
+	} );
+
+	it( "records demandKc and kcSource in the decision record", () => {
+		const r = step( undefined, dryInput({ kcSource: "plant", params: asymParams( 0.5, 0.9 ) }) );
+		const rec = r.state.history[ r.state.history.length - 1 ];
+		expect( rec.demandKc ).to.equal( 0.5 );
+		expect( rec.kcSource ).to.equal( "plant" );
+	} );
+} );

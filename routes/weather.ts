@@ -18,6 +18,7 @@ import WaterBudgetAdjustmentMethod from "./adjustmentMethods/WaterBudgetAdjustme
 import { CodedError, ErrorCode, makeCodedError } from "../errors";
 import { Geocoder } from "./geocoders/Geocoder";
 import { applyWeatherSkips } from "./skips/SkipGuard";
+import { buildFallbackChain, FallbackWeatherProvider, isPwsFallbackEnabled, parseFallbackKeys } from "./weatherProviders/FallbackWeatherProvider";
 
 const WEATHER_PROVIDERS: { [method: string] : WeatherProvider} = {
 	"AW": new ( require("./weatherProviders/AccuWeather" ).default )(),
@@ -31,6 +32,30 @@ const WEATHER_PROVIDERS: { [method: string] : WeatherProvider} = {
 
 const PWS_WEATHER_PROVIDER: WeatherProvider = new ( require("./weatherProviders/" + ( process.env.PWS_WEATHER_PROVIDER || "WUnderground" ) ).default )();
 const GEOCODER: Geocoder = new ( require("./geocoders/" + ( process.env.GEOCODER || "WUnderground" ) ).default )();
+
+/**
+ * Select the WeatherProvider for a request. Returns a bare provider when no fallback chain is
+ * configured (identical to the historical behavior), or a FallbackWeatherProvider composite when
+ * a chain is present. PWS default honors the station (bare); the chain is added to the PWS path
+ * only when PWS_FALLBACK_ENABLED. Local mode always returns a bare local provider (no chain).
+ */
+export function resolveWeatherProvider(
+	adjustmentOptions: AdjustmentOptions,
+	pws: PWS | undefined
+): WeatherProvider {
+	if ( process.env.WEATHER_PROVIDER === "local" ) {
+		return new ( require( "./weatherProviders/local" ).default )();
+	}
+	const lookup = ( key: string ): WeatherProvider | undefined => WEATHER_PROVIDERS[ key ];
+	if ( pws && pws.id ) {
+		if ( !isPwsFallbackEnabled() ) return PWS_WEATHER_PROVIDER;
+		const pwsChain = buildFallbackChain( PWS_WEATHER_PROVIDER, parseFallbackKeys( adjustmentOptions ), lookup );
+		return pwsChain.length > 1 ? new FallbackWeatherProvider( pwsChain, true ) : PWS_WEATHER_PROVIDER;
+	}
+	const primary = WEATHER_PROVIDERS[ adjustmentOptions.provider ] || WEATHER_PROVIDERS[ "Apple" ];
+	const chain = buildFallbackChain( primary, parseFallbackKeys( adjustmentOptions ), lookup );
+	return chain.length > 1 ? new FallbackWeatherProvider( chain, false ) : primary;
+}
 
 const filters = {
 	gps: /^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/,
@@ -135,12 +160,23 @@ export function convertToLegacyFormat(enhancedData: any, adjustmentMethod: Adjus
 				eto: rawDataSource.eto, etc: rawDataSource.etc, p: rawDataSource.p,
 				bank: rawDataSource.bank, reason: rawDataSource.reason
 			});
+			if ( rawDataSource.kcSource !== undefined ) {
+				legacyData.rawData.kc = rawDataSource.kc;
+				legacyData.rawData.kcSource = rawDataSource.kcSource;
+			}
 		}
 		// Universal passthrough for cross-cutting weather-skip metadata (applies to ALL methods).
 		if ( rawDataSource.skip ) {
 			legacyData.rawData.skip = rawDataSource.skip;
 			if ( rawDataSource.skipReason !== undefined ) {
 				legacyData.rawData.skipReason = rawDataSource.skipReason;
+			}
+		}
+		// Universal passthrough for cross-cutting fallback metadata (applies to ALL methods).
+		if ( rawDataSource.pwsBypassed ) {
+			legacyData.rawData.pwsBypassed = rawDataSource.pwsBypassed;
+			if ( rawDataSource.pwsBypassReason !== undefined ) {
+				legacyData.rawData.pwsBypassReason = rawDataSource.pwsBypassReason;
 			}
 		}
 	} else {
@@ -214,10 +250,130 @@ function getTimeDataForCoordinates( coordinates: GeoCoordinates ): TimeData {
 	};
 }
 
-function checkWeatherRestriction( adjustmentValue: number, weather: BaseWateringData ): boolean {
+const METHOD_NAMES: { [ id: number ]: string } = {
+	0: "manual", 1: "zimmerman", 2: "rainDelay", 3: "eto", 4: "waterBudget"
+};
+
+/**
+ * Build the PWS object from adjustment options, with the exact validation the legacy handlers used:
+ * provider "WU" + pws + key requires alphanumeric pws id and 32-hex key (throws InvalidPwsId /
+ * InvalidPwsApiKey otherwise); a bare key becomes a provider API key; otherwise undefined.
+ */
+export function buildPwsFromParams( adjustmentOptions: AdjustmentOptions ): PWS | undefined {
+	if ( adjustmentOptions.provider === "WU" && adjustmentOptions.pws && adjustmentOptions.key ) {
+		const idMatch = adjustmentOptions.pws.match( /^[a-zA-Z\d]+$/ );
+		const pwsId = idMatch ? idMatch[ 0 ] : undefined;
+		const keyMatch = adjustmentOptions.key.match( /^[a-f\d]{32}$/ );
+		const apiKey = keyMatch ? keyMatch[ 0 ] : undefined;
+		if ( !pwsId ) throw new CodedError( ErrorCode.InvalidPwsId );
+		if ( !apiKey ) throw new CodedError( ErrorCode.InvalidPwsApiKey );
+		return { id: pwsId, apiKey: apiKey };
+	} else if ( adjustmentOptions.key ) {
+		return { apiKey: adjustmentOptions.key };
+	}
+	return undefined;
+}
+
+export function checkWeatherRestriction( adjustmentValue: number, weather: BaseWateringData ): boolean {
 	const californiaRestriction = ( adjustmentValue >> 7 ) & 1;
 	if ( californiaRestriction && weather.precip > 0.1 ) return true;
 	return false;
+}
+
+export interface WateringDecisionInput {
+	coordinates: GeoCoordinates;
+	adjustmentParam: number;
+	adjustmentOptions: AdjustmentOptions;
+	pws: PWS | undefined;
+}
+
+export interface WateringDecision {
+	coordinates: GeoCoordinates;
+	methodId: number;
+	methodName: string;
+	scale: number | undefined;
+	rainDelay: number | undefined;
+	rawData: any;
+	weatherProvider: string;
+	skip: boolean;
+	skipReason?: string;
+	servedFallback: boolean;
+	pwsBypassed: boolean;
+}
+
+/**
+ * Shared watering-decision core used by both the legacy handler and /v1. Resolves the provider,
+ * uses the WateringScaleCache, runs the adjustment method, applies the restriction + fallback
+ * metadata + cache-store rules, and the live skip overlay — identically to the legacy path.
+ * Throws CodedError on invalid method / calculation / restriction-fetch failure.
+ */
+export async function computeWateringDecision( input: WateringDecisionInput ): Promise< WateringDecision > {
+	const { coordinates, adjustmentParam, adjustmentOptions, pws } = input;
+	const methodId = adjustmentParam & ~( 1 << 7 );
+	const adjustmentMethod: AdjustmentMethod = ADJUSTMENT_METHOD[ methodId ];
+	if ( !adjustmentMethod ) throw new CodedError( ErrorCode.InvalidAdjustmentMethod );
+	const checkRestrictions: boolean = ( ( adjustmentParam >> 7 ) & 1 ) > 0;
+
+	const weatherProvider: WeatherProvider = resolveWeatherProvider( adjustmentOptions, pws );
+
+	let decision: { scale: number | undefined; rd: number | undefined; rawData: any } =
+		{ scale: undefined, rd: undefined, rawData: undefined };
+
+	let cachedScale: CachedScale | undefined;
+	if ( weatherProvider.shouldCacheWateringScale() ) {
+		cachedScale = cache.getWateringScale( adjustmentParam, coordinates, pws, adjustmentOptions );
+	}
+
+	if ( cachedScale ) {
+		decision.scale = cachedScale.scale;
+		decision.rawData = cachedScale.rawData;
+		decision.rd = cachedScale.rainDelay;
+	} else {
+		const adjustmentMethodResponse: AdjustmentMethodResponse = await adjustmentMethod.calculateWateringScale(
+			adjustmentOptions, coordinates, weatherProvider, pws
+		);
+		decision.scale = adjustmentMethodResponse.scale;
+		decision.rd = adjustmentMethodResponse.rainDelay;
+		decision.rawData = adjustmentMethodResponse.rawData;
+
+		if ( checkRestrictions ) {
+			let wateringDataForRestriction: BaseWateringData | undefined = adjustmentMethodResponse.wateringData;
+			if ( !wateringDataForRestriction ) {
+				wateringDataForRestriction = await weatherProvider.getWateringData( coordinates, pws );
+			}
+			if ( wateringDataForRestriction && checkWeatherRestriction( adjustmentParam, wateringDataForRestriction ) ) {
+				decision.scale = 0;
+			}
+		}
+		if ( ( weatherProvider as any ).pwsBypassed && decision.rawData ) {
+			decision.rawData = {
+				...decision.rawData,
+				pwsBypassed: 1,
+				pwsBypassReason: ( weatherProvider as any ).pwsBypassReason
+			};
+		}
+		if ( weatherProvider.shouldCacheWateringScale() && !( weatherProvider as any ).servedFallback ) {
+			cache.storeWateringScale( adjustmentParam, coordinates, pws, adjustmentOptions,
+				{ scale: decision.scale, rawData: decision.rawData, rainDelay: decision.rd } );
+		}
+	}
+
+	decision = await applyWeatherSkips( decision, weatherProvider, coordinates, pws, adjustmentOptions );
+
+	const rawData = decision.rawData || {};
+	return {
+		coordinates,
+		methodId,
+		methodName: METHOD_NAMES[ methodId ] || String( methodId ),
+		scale: decision.scale,
+		rainDelay: decision.rd,
+		rawData: decision.rawData,
+		weatherProvider: rawData.wp || adjustmentOptions.provider || "",
+		skip: !!rawData.skip,
+		skipReason: rawData.skipReason,
+		servedFallback: !!( weatherProvider as any ).servedFallback,
+		pwsBypassed: !!( weatherProvider as any ).pwsBypassed
+	};
 }
 
 export const getWeatherData = async function( req: express.Request, res: express.Response ) {
@@ -248,25 +404,15 @@ export const getWeatherData = async function( req: express.Request, res: express
 		return;
 	}
 
-	let pws: PWS | undefined = undefined;
-	if ( adjustmentOptions.provider === "WU" && adjustmentOptions.pws && adjustmentOptions.key ) {
-		const idMatch = adjustmentOptions.pws.match( /^[a-zA-Z\d]+$/ );
-		const pwsId = idMatch ? idMatch[ 0 ] : undefined;
-		const keyMatch = adjustmentOptions.key.match( /^[a-f\d]{32}$/ );
-		const apiKey = keyMatch ? keyMatch[ 0 ] : undefined;
-		if ( !pwsId ) { sendWateringError( res, new CodedError( ErrorCode.InvalidPwsId ) ); return; }
-		if ( !apiKey ) { sendWateringError( res, new CodedError( ErrorCode.InvalidPwsApiKey ) ); return; }
-		pws = { id: pwsId, apiKey: apiKey };
-	} else if ( adjustmentOptions.key ){
-		pws = {apiKey: adjustmentOptions.key};
+	let pws: PWS | undefined;
+	try {
+		pws = buildPwsFromParams( adjustmentOptions );
+	} catch ( err ) {
+		sendWateringError( res, makeCodedError( err ) );
+		return;
 	}
 
-	let activeWeatherProvider: WeatherProvider;
-	if (process.env.WEATHER_PROVIDER === "local") {
-		activeWeatherProvider = new ( require("./weatherProviders/local" ).default )();
-	} else {
-		activeWeatherProvider = WEATHER_PROVIDERS[adjustmentOptions.provider] || WEATHER_PROVIDERS['Apple'];
-	}
+	let activeWeatherProvider: WeatherProvider = resolveWeatherProvider( adjustmentOptions, pws );
 	debugLog(`DEBUG getWeatherData: Using provider: ${activeWeatherProvider.constructor.name}`);
 	
 	const timeData: TimeData = getTimeDataForCoordinates( coordinates );
@@ -330,93 +476,32 @@ export const getWateringData = async function( req: express.Request, res: expres
 
 	let timeData: TimeData = getTimeDataForCoordinates( coordinates ); 
 
-	let pws: PWS | undefined = undefined;
-	if ( adjustmentOptions.provider === "WU" && adjustmentOptions.pws && adjustmentOptions.key ) {
-		const idMatch = adjustmentOptions.pws.match( /^[a-zA-Z\d]+$/ );
-		const pwsId = idMatch ? idMatch[ 0 ] : undefined;
-		const keyMatch = adjustmentOptions.key.match( /^[a-f\d]{32}$/ );
-		const apiKey = keyMatch ? keyMatch[ 0 ] : undefined;
-		if ( !pwsId ) { sendWateringError( res, new CodedError( ErrorCode.InvalidPwsId ), adjustmentMethod !== ManualAdjustmentMethod, isLegacyRequest ); return; }
-		if ( !apiKey ) { sendWateringError( res, new CodedError( ErrorCode.InvalidPwsApiKey ), adjustmentMethod !== ManualAdjustmentMethod, isLegacyRequest ); return; }
-		pws = { id: pwsId, apiKey: apiKey };
-	} else if ( adjustmentOptions.key ){
-		pws = {apiKey: adjustmentOptions.key};
+	let pws: PWS | undefined;
+	try {
+		pws = buildPwsFromParams( adjustmentOptions );
+	} catch ( err ) {
+		sendWateringError( res, makeCodedError( err ), adjustmentMethod !== ManualAdjustmentMethod, isLegacyRequest );
+		return;
 	}
 
-	let weatherProvider: WeatherProvider;
-	if( pws && pws.id ){
-		weatherProvider = PWS_WEATHER_PROVIDER;
-	} else {
-		if (process.env.WEATHER_PROVIDER === "local") {
-			weatherProvider = new ( require("./weatherProviders/local" ).default )();
-		} else {
-			weatherProvider = WEATHER_PROVIDERS[adjustmentOptions.provider] || WEATHER_PROVIDERS['Apple'];
-		}
+	let decision: WateringDecision;
+	try {
+		decision = await computeWateringDecision( { coordinates, adjustmentParam, adjustmentOptions, pws } );
+	} catch ( err ) {
+		sendWateringError( res, makeCodedError( err ), adjustmentMethod !== ManualAdjustmentMethod, isLegacyRequest, outputFormat === "json" );
+		return;
 	}
-	debugLog(`DEBUG getWateringData: Selected weather provider: ${weatherProvider.constructor.name}`);
 
-	const initialDataStructure = {
-		scale: undefined, rd: undefined,
+	let dataToSend: any = {
+		scale: decision.scale,
+		rd: decision.rainDelay,
 		tz: getTimezone( timeData.timezone, false ),
-		sunrise: timeData.sunrise, sunset: timeData.sunset,
-		eip: ipToInt( remoteAddress ), rawData: undefined as any, errCode: 0
+		sunrise: timeData.sunrise,
+		sunset: timeData.sunset,
+		eip: ipToInt( remoteAddress ),
+		rawData: decision.rawData,
+		errCode: 0
 	};
-
-	let cachedScale: CachedScale | undefined; 
-	if ( weatherProvider.shouldCacheWateringScale() ) {
-		cachedScale = cache.getWateringScale( adjustmentParam, coordinates, pws, adjustmentOptions );
-	}
-
-	let dataToSend = { ...initialDataStructure };
-
-	if ( cachedScale ) {
-        debugLog(`DEBUG getWateringData: Using cached watering scale: ${JSON.stringify(cachedScale)}`);
-		dataToSend.scale = cachedScale.scale;
-		dataToSend.rawData = cachedScale.rawData;
-		dataToSend.rd = cachedScale.rainDelay;
-	} else {
-		let adjustmentMethodResponse: AdjustmentMethodResponse;
-		try {
-			adjustmentMethodResponse = await adjustmentMethod.calculateWateringScale(
-				adjustmentOptions, coordinates, weatherProvider, pws
-			);
-			debugLog(`DEBUG getWateringData: ${adjustmentMethod.constructor.name}.calculateWateringScale response: ${JSON.stringify(adjustmentMethodResponse)}`);
-		} catch ( err ) {
-			sendWateringError( res, makeCodedError( err ), adjustmentMethod !== ManualAdjustmentMethod, isLegacyRequest, outputFormat === "json" );
-			return;
-		}
-		dataToSend.scale = adjustmentMethodResponse.scale;
-		dataToSend.rd = adjustmentMethodResponse.rainDelay;
-		dataToSend.rawData = adjustmentMethodResponse.rawData;
-
-		if ( checkRestrictions ) {
-			let wateringDataForRestriction: BaseWateringData | undefined = adjustmentMethodResponse.wateringData; 
-			if ( !wateringDataForRestriction ) {
-				try {
-                    debugLog(`DEBUG getWateringData: Fetching watering data for restriction check from ${weatherProvider.constructor.name}`);
-					wateringDataForRestriction = await weatherProvider.getWateringData( coordinates, pws );
-                    debugLog(`DEBUG getWateringData: Watering data for restriction check: ${JSON.stringify(wateringDataForRestriction)}`);
-				} catch ( err ) {
-					sendWateringError( res, makeCodedError( err ), adjustmentMethod !== ManualAdjustmentMethod, isLegacyRequest, outputFormat === "json" );
-					return;
-				}
-			}
-			if ( wateringDataForRestriction && checkWeatherRestriction( adjustmentParam, wateringDataForRestriction ) ) {
-                debugLog(`DEBUG getWateringData: Weather restriction met. Setting scale to 0.`);
-				dataToSend.scale = 0;
-			}
-		}
-		if ( weatherProvider.shouldCacheWateringScale() ) {
-            const cacheEntry = { scale: dataToSend.scale, rawData: dataToSend.rawData, rainDelay: dataToSend.rd };
-            debugLog(`DEBUG getWateringData: Caching watering scale: ${JSON.stringify(cacheEntry)}`);
-			cache.storeWateringScale( adjustmentParam, coordinates, pws, adjustmentOptions, cacheEntry );
-		}
-	}
-
-	// Live, additive weather-skip overlay. Runs on every request (cache hit or miss), after the
-	// method + restriction have resolved the scale. Returns a fresh object (never mutates the
-	// cached result) and only sets scale=0 / skip metadata when a skip actually fires.
-	dataToSend = await applyWeatherSkips( dataToSend, weatherProvider, coordinates, pws, adjustmentOptions );
 	
     debugLog(`DEBUG getWateringData: Data before legacy conversion (dataToSend): ${JSON.stringify(dataToSend)}`);
 	let responseData = dataToSend;

@@ -8,11 +8,13 @@ import * as MockDate from 'mockdate';
 process.env.WEATHER_PROVIDER = "OWM";
 process.env.OWM_API_KEY = "NO_KEY";
 
-import { convertToLegacyFormat, getWateringData } from './weather';
+import { computeWateringDecision, convertToLegacyFormat, getWateringData, resolveWeatherProvider } from './weather';
 import { GeoCoordinates, WeatherData, ZimmermanWateringData } from "../types";
 import { WeatherProvider } from "./weatherProviders/WeatherProvider";
 import { EToData } from "./adjustmentMethods/EToAdjustmentMethod";
 import ManualAdjustmentMethod from './adjustmentMethods/ManualAdjustmentMethod';
+import WaterBudgetAdjustmentMethod from './adjustmentMethods/WaterBudgetAdjustmentMethod';
+import { FallbackWeatherProvider } from './weatherProviders/FallbackWeatherProvider';
 
 const expected = require( '../test/expected.json' );
 const replies = require( '../test/replies.json' );
@@ -31,8 +33,97 @@ describe( 'convertToLegacyFormat skip passthrough', () => {
 	} );
 } );
 
+describe( 'convertToLegacyFormat pwsBypassed passthrough', () => {
+	it( 'preserves pwsBypassed / pwsBypassReason for any method', () => {
+		const enhanced = {
+			scale: 70, rd: undefined, tz: 32, sunrise: 100, sunset: 200, eip: 1, errCode: 0,
+			rawData: { wp: 'OWM', pwsBypassed: 1, pwsBypassReason: 'errCode 12' }
+		};
+		const out: any = convertToLegacyFormat( enhanced, ManualAdjustmentMethod );
+		expect( out.rawData.pwsBypassed ).to.equal( 1 );
+		expect( out.rawData.pwsBypassReason ).to.equal( 'errCode 12' );
+	} );
+} );
+
+describe( 'convertToLegacyFormat WaterBudget kc passthrough', () => {
+	it( 'forwards kc / kcSource for the WaterBudget method when present', () => {
+		const enhanced = {
+			scale: 80, rd: undefined, tz: 32, sunrise: 100, sunset: 200, eip: 1, errCode: 0,
+			rawData: { wp: 'WaterBudget', eto: 0.2, etc: 0.16, p: 0, bank: 0, reason: 'Scale 80%: dry conditions.', kc: 0.8, kcSource: 'plant' }
+		};
+		const out: any = convertToLegacyFormat( enhanced, WaterBudgetAdjustmentMethod );
+		expect( out.rawData.kc ).to.equal( 0.8 );
+		expect( out.rawData.kcSource ).to.equal( 'plant' );
+	} );
+} );
+
+describe( 'resolveWeatherProvider', () => {
+	afterEach( () => {
+		delete process.env.WEATHER_PROVIDER_FALLBACKS;
+		delete process.env.PWS_FALLBACK_ENABLED;
+		delete process.env.WEATHER_PROVIDER;
+	} );
+
+	it( 'returns a bare provider when no chain is configured', () => {
+		const p = resolveWeatherProvider( { provider: 'OWM' } as any, undefined );
+		expect( p ).to.not.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'returns a FallbackWeatherProvider when WEATHER_PROVIDER_FALLBACKS is set', () => {
+		process.env.WEATHER_PROVIDER_FALLBACKS = 'DWD,Apple';
+		const p = resolveWeatherProvider( { provider: 'OWM' } as any, undefined );
+		expect( p ).to.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'lets wto.fallbacks trigger the composite even when env is unset', () => {
+		const p = resolveWeatherProvider( { provider: 'OWM', fallbacks: [ 'DWD' ] } as any, undefined );
+		expect( p ).to.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'honors a PWS with no fallback by default (bare provider)', () => {
+		process.env.WEATHER_PROVIDER_FALLBACKS = 'DWD';
+		const p = resolveWeatherProvider( { provider: 'WU' } as any, { id: 'KXX', apiKey: 'x' } );
+		expect( p ).to.not.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'adds the chain to the PWS path only when PWS_FALLBACK_ENABLED', () => {
+		process.env.WEATHER_PROVIDER_FALLBACKS = 'DWD';
+		process.env.PWS_FALLBACK_ENABLED = 'true';
+		const p = resolveWeatherProvider( { provider: 'WU' } as any, { id: 'KXX', apiKey: 'x' } );
+		expect( p ).to.be.instanceOf( FallbackWeatherProvider );
+	} );
+
+	it( 'returns a bare local provider in local mode (no chain)', () => {
+		process.env.WEATHER_PROVIDER = 'local';
+		process.env.WEATHER_PROVIDER_FALLBACKS = 'DWD';
+		const p = resolveWeatherProvider( { provider: 'OWM' } as any, undefined );
+		expect( p ).to.not.be.instanceOf( FallbackWeatherProvider );
+	} );
+} );
+
 describe('Watering Data', () => {
     beforeEach(() => MockDate.set('5/13/2019'));
+
+    it('computeWateringDecision returns a clean decision object reflecting the served provider', async () => {
+        mockGeocoder();
+        mockOWMWatering();
+        const { computeWateringDecision } = require('./weather');
+        const decision: any = await computeWateringDecision({
+            coordinates: [ 42.3732, -72.5199 ],
+            adjustmentParam: 1,                       // Zimmerman, no restriction bit
+            adjustmentOptions: { provider: 'OWM' },
+            pws: undefined
+        });
+        expect( decision.methodId ).to.equal( 1 );
+        expect( decision.methodName ).to.equal( 'zimmerman' );
+        expect( decision.scale ).to.be.a( 'number' );
+        expect( decision.weatherProvider ).to.equal( decision.rawData.wp );
+        expect( decision.skip ).to.equal( false );
+        expect( decision.servedFallback ).to.equal( false );
+        // No legacy-only fields leak into the decision object.
+        expect( ( decision as any ).tz ).to.equal( undefined );
+        expect( ( decision as any ).eip ).to.equal( undefined );
+    });
 
     it('OpenWeatherMap Lookup (Adjustment Method 0, Location 01002)', async () => {
         mockGeocoder();

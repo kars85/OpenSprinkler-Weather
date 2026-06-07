@@ -7,6 +7,17 @@ import { CodedError, ErrorCode } from "../../errors";
 
 // Import enhanced forecast interfaces
 import { EnhancedWeatherProvider, ForecastEToData } from "../weatherProviders/local";
+import { resolveCropCoefficient } from "./PlantCoefficients";
+
+/**
+ * Structural (duck-typed) capability check that ALSO narrows the type so the forecast block can
+ * call the forecast methods. Replaces an `instanceof EnhancedWeatherProvider` check that (a)
+ * excluded the FallbackWeatherProvider wrapper and (b) silently excluded OpenMeteo, whose
+ * EnhancedWeatherProvider is a different class from local's.
+ */
+export function supportsForecast( wp: any ): wp is EnhancedWeatherProvider {
+	return !!wp && typeof wp.supportsForecasting === "function" && wp.supportsForecasting();
+}
 
 /**
  * Enhanced turfgrass management with crop coefficients and seasonal intelligence
@@ -327,29 +338,33 @@ async function calculateEToWateringScale(
     if (enableCropCoefficient) {
         const avgTemp = (historicalEtoData.maxTemp + historicalEtoData.minTemp) / 2;
         const dayOfYear = moment.unix(historicalEtoData.periodStartTime).dayOfYear();
-        
-        const kcResult = TurfgrassManager.calculateCropCoefficient(
-            grassType,
-            grassVariety,
-            coordinates,
-            usdaZone,
-            avgTemp,
-            historicalEtoData.precip,
+
+        const kcResult = resolveCropCoefficient(
+            adjustmentOptions,
             dayOfYear,
-            managementLevel
+            () => TurfgrassManager.calculateCropCoefficient(
+                grassType,
+                grassVariety,
+                coordinates,
+                usdaZone,
+                avgTemp,
+                historicalEtoData.precip,
+                dayOfYear,
+                managementLevel
+            )
         );
-        
+
         cropCoefficient = kcResult.kc;
         cropFactors = kcResult.factors;
-        
-        console.log(`DEBUG: Crop coefficient calculated: ${cropCoefficient}`);
+
+        console.log(`DEBUG: Crop coefficient resolved: ${cropCoefficient} (source: ${cropFactors && cropFactors.source})`);
     }
 
     // Get irrigation efficiency
     const irrigationEfficiency = TurfgrassManager.getIrrigationEfficiency(irrigationSystem);
 
     // Try enhanced forecast integration if provider supports it
-    if (weatherProvider instanceof EnhancedWeatherProvider && weatherProvider.supportsForecasting()) {
+    if (supportsForecast(weatherProvider)) {
         const enableForecast = process.env.ENABLE_FORECAST !== 'false';
         
         if (enableForecast) {
@@ -818,6 +833,8 @@ export interface EToScalingAdjustmentOptions extends AdjustmentOptions {
    enableCropCoefficient?: boolean;
    /** NEW: Custom crop coefficient override */
    customCropCoefficient?: number;
+   /** NEW: Named plant preset selecting a seasonal Kc curve (see PlantCoefficients). */
+   plantType?: string;
 }
 
 /** Data about the cloud coverage for a period of time. */

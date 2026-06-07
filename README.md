@@ -63,6 +63,10 @@ For more information on the "WeeWX Solution" click [here](docs/weewx.md)
 
 - For multi-day, rain-aware **Water-Budget** watering (adjustment method 4), see [here](docs/water-budget.md)
 - For optional **freeze / wind / rain skips** (force watering to 0% in bad conditions), see [here](docs/weather-skips.md)
+- For optional **weather provider fallback** (try a backup provider when the primary fails), see [here](docs/weather-provider-fallback.md)
+- For **per-plant crop coefficients** (plant presets or an explicit Kc for the ETo method), see [here](docs/per-plant-kc.md)
+- For the **`/v1` JSON API** (smart-home / dashboard read access: watering decision, weather, budget), see [here](docs/v1-api.md)
+- For **MQTT publishing + Home Assistant** (push watering/weather/budget to your broker), see [here](docs/mqtt.md)
 
 ## Docker
 

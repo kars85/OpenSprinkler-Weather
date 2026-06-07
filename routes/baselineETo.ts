@@ -1,7 +1,6 @@
 import * as express from "express";
 import * as fs from "fs";
 import { GeoCoordinates } from "../types";
-import { getParameter, resolveCoordinates } from "./weather"; // Assuming these are correctly exported from weather.ts
 
 const DATA_FILE = __dirname + "/../../baselineEToData/Baseline_ETo_Data.bin";
 let FILE_META: FileMeta | undefined; // Allow undefined initially
@@ -28,6 +27,7 @@ readFileHeader().then( ( fileMeta ) => {
 
 export const getBaselineETo = async function( req: express.Request, res: express.Response ) {
     console.log("DEBUG: getBaselineETo called with query:", req.query);
+	const { getParameter, resolveCoordinates } = require( "./weather" );
 	const locationQueryParam = req.query.loc;
 	const location: string	= getParameter( locationQueryParam as string | string[] | undefined );
 
