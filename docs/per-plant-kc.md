@@ -40,6 +40,21 @@ value as `rawData.crop_coefficient` (legacy `kc`).
 ## Water-Budget method
 
 The Water-Budget method (adjustment method 4) also supports these plant presets, but via
-its own **env-only** settings — `BUDGET_PLANT_TYPE` and `BUDGET_CUSTOM_CROP_COEFFICIENT`
+its own settings — `BUDGET_PLANT_TYPE` and `BUDGET_CUSTOM_CROP_COEFFICIENT`
 (not the `PLANT_TYPE` / `CUSTOM_CROP_COEFFICIENT` used by the ETo method). The preset
 catalog and seasonal curves are identical. See the Water-Budget guide for details.
+
+### Per-request Water-Budget Kc
+
+Water-Budget also accepts a per-request `budgetKc` query option for adjustment method 4.
+It overrides the Water-Budget Kc for that request only; when it is absent or invalid, the
+method falls back to `BUDGET_CUSTOM_CROP_COEFFICIENT`, then `BUDGET_PLANT_TYPE`, then
+`BUDGET_KC` as the budget reference. `budgetKc` uses the same `clampKc` validation bounds
+as other Kc overrides (`KC_MIN` 0.1, `KC_MAX` 1.5). Non-numeric or otherwise junk values
+are ignored and fall back to the configured defaults.
+
+The override is applied only when the Water-Budget model advances for a new local day. On
+the first advancing poll, `budgetKc` flows into ETc and depletion and is reported with
+`kcSource: "override-budget"`. On a same-day re-poll, the day is locked: the cached scale
+is returned, there is no recompute and no persisted pending override, and the response
+reports `budgetKcApplied: false`.

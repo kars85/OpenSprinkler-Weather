@@ -37,6 +37,14 @@ function clampDown( scale: number, mx: number | undefined ): number {
 	return ( typeof mx === "number" && Number.isFinite( mx ) && mx > 0 ) ? Math.min( scale, mx ) : scale;
 }
 
+/*
+ * Per-request budgetKc and budgetMaxScale are now supported, not ENV-only:
+ * budgetKc is clampKc-validated and applies on the day's first advancing poll
+ * (ETc -> depletion, kcSource "override-budget"). Same-day re-polls are locked:
+ * return cached scale with budgetKcApplied:false, no recompute or persisted pending
+ * state. budgetMaxScale is a downward-only post-step clamp on the returned scale;
+ * persisted state stays unclamped, and a higher mx is a same-day no-op.
+ */
 function resolveParams(): BudgetParams {
 	const baseKc = envNum( "BUDGET_KC", 0.9 );
 	return {

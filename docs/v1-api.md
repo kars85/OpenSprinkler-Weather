@@ -9,7 +9,10 @@ HTTP status codes with a `{ "error": { "code", "message" } }` body.
 Returns the same watering decision the firmware would receive, as clean JSON.
 
 Query: `loc` (required), `method` (required, integer 0–4: 0 manual, 1 zimmerman, 2 rainDelay,
-3 eto, 4 waterBudget), `provider`, `pws`, `key` (optional).
+3 eto, 4 waterBudget), `provider`, `pws`, `key` (optional). For `method=4`, Water-Budget
+also accepts `budgetKc` and `budgetMaxScale` as per-request adjustment options; legacy
+callers place the same fields in `wto` and the service passes them through
+`adjustmentOptions`.
 
 `restrict` (optional `1`/`true`) — force-enables the rain skip (skip watering when recent precip
 ≥ `RAIN_SKIP`, default 0.1in), evaluated live and fail-open. Equivalent to the firmware's rain
@@ -20,6 +23,23 @@ restriction bit. When it fires, the response has `skip: true` + a rain `skipReas
   "rainDelay":0, "skip":false, "skipReason":null, "pwsBypassed":false,
   "weatherProvider":"OWM", "reason":"Scale 80%: ...", "raw":{ } }
 ```
+
+### Water-Budget per-request options
+
+`budgetKc` overrides the Water-Budget crop coefficient for that request when the model
+advances for a new local day. It is stateless: absent or invalid values fall back to the
+Water-Budget env configuration, and a same-day re-poll does not recompute or persist a
+pending override. When a new-day override is applied, `raw` includes `kcSource` set to
+`"override-budget"` and `budgetKcApplied: true`. When a same-day request asks for a
+different Kc after the day is already locked, the cached scale is returned with
+`budgetKcApplied: false`, `budgetKcRequested`, and `budgetKcLockedForToday: true`.
+
+`budgetMaxScale` is a per-request returned-scale clamp only. It can tighten the returned
+Water-Budget scale downward after the model step, including same-day cached or stale-hold
+returns, but it does not mutate persisted budget state. A higher `budgetMaxScale` on a
+same-day re-poll is a no-op because the cached scale remains the ceiling. When supplied,
+`raw` reports `budgetMaxScale` and `budgetMaxScaleApplied` so callers can tell whether the
+returned scale was actually clamped.
 
 ## `GET /v1/weather`
 
