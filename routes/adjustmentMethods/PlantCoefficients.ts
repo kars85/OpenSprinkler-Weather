@@ -32,6 +32,8 @@ export const PLANT_KC_CATALOG: { [ k: string ]: PlantKc } = {
  */
 export function clampKc( value: any ): number | undefined {
 	if ( value === undefined || value === null ) return undefined;
+	if ( typeof value === "boolean" ) return undefined;
+	if ( typeof value === "string" && value.trim() === "" ) return undefined;
 	const n = Number( value );
 	if ( !Number.isFinite( n ) ) return undefined;
 	return Math.min( KC_MAX, Math.max( KC_MIN, n ) );

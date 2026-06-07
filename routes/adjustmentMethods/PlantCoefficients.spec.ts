@@ -13,6 +13,10 @@ describe( "PlantCoefficients.clampKc", () => {
 		expect( clampKc( NaN ) ).to.equal( undefined );
 		expect( clampKc( "abc" ) ).to.equal( undefined );
 		expect( clampKc( null ) ).to.equal( undefined );
+		expect( clampKc( "" ) ).to.equal( undefined );
+		expect( clampKc( "   " ) ).to.equal( undefined );
+		expect( clampKc( false ) ).to.equal( undefined );
+		expect( clampKc( true ) ).to.equal( undefined );
 	} );
 } );
 
