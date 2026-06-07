@@ -18,6 +18,11 @@ export interface TimeData {
 export interface WeatherData {
     /** The WeatherProvider that generated this data. */
     weatherProvider: WeatherProviderId;
+    /**
+     * Runtime contract violations detected while normalizing provider output.
+     * Malformed safety-critical fields are surfaced via contractViolations and must never be silently treated as below-threshold/no-rain; enforcement of caution-skip is deferred to the provider-routing pass (P2).
+     */
+    contractViolations?: string[];
     /** The current temperature (in Fahrenheit). */
     temp: number;
     /** The current humidity (as a percentage). */
