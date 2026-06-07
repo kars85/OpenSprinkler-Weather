@@ -6,7 +6,7 @@ import { WeatherProvider } from "../weatherProviders/WeatherProvider";
 import { calculateETo, EToData, EToScalingAdjustmentOptions } from "./EToAdjustmentMethod";
 import { getBaselineDailyETo } from "../baselineETo";
 import { BudgetParams, BudgetState, DecisionRecord, step } from "./SoilMoistureModel";
-import { resolveCropCoefficient } from "./PlantCoefficients";
+import { clampKc, resolveCropCoefficient } from "./PlantCoefficients";
 import { FileStateStore, StateStore } from "../state/StateStore";
 import { CodedError, ErrorCode, makeCodedError } from "../../errors";
 
@@ -28,10 +28,6 @@ function optNum( value: any, fallback: number ): number {
 	return Number.isFinite( v ) && v > 0 ? v : fallback;
 }
 
-// Config is ENV-ONLY in v1. Per-request kc/mx overrides were considered but
-// dropped: state advances once per calendar day (same-day re-polls are idempotent),
-// so a same-day kc/mx change could not take effect and would mislead. Per-request
-// tuning is a deliberate future enhancement.
 function resolveParams(): BudgetParams {
 	const baseKc = envNum( "BUDGET_KC", 0.9 );
 	return {
@@ -90,6 +86,16 @@ function buildRawDataFromDecision( weatherProvider: string, scale: number, recor
 	return raw;
 }
 
+function withLateBudgetKcFlag( rawData: any, requestedKc: number, appliedKc: number | undefined ): any {
+	return {
+		...rawData,
+		budgetKcApplied: false,
+		budgetKcRequested: round( requestedKc, 2 ),
+		budgetKcLockedForToday: true,
+		reason: `${ rawData.reason || `Scale ${ rawData.scale }%: cached WaterBudget result.` } Budget Kc override locked for today; applied Kc ${ appliedKc === undefined ? "unknown" : round( appliedKc, 2 ) } remains in effect until the next advancing poll.`
+	};
+}
+
 async function calculateWaterBudgetScale(
 	adjustmentOptions: AdjustmentOptions,
 	coordinates: GeoCoordinates,
@@ -98,6 +104,7 @@ async function calculateWaterBudgetScale(
 ): Promise< AdjustmentMethodResponse > {
 	const params = resolveParams();
 	const elevation = optNum( ( adjustmentOptions as EToScalingAdjustmentOptions ).elevation, envNum( "BUDGET_ELEVATION", 600 ) );
+	const overrideKc = clampKc( adjustmentOptions.budgetKc );
 	const key = stateKey( coordinates );
 
 	let etoData: EToData;
@@ -136,9 +143,12 @@ async function calculateWaterBudgetScale(
 	if ( prev && prev.lastUpdated === today ) {
 		const last = prev.history[ prev.history.length - 1 ];
 		if ( last ) {
+			const rawData = buildRawDataFromDecision( etoData.weatherProvider, prev.lastScale, last );
+			const lateBudgetKc = overrideKc !== undefined
+				&& ( last.demandKc === undefined || Math.abs( overrideKc - last.demandKc ) > 0.005 );
 			return {
 				scale: prev.lastScale,
-				rawData: buildRawDataFromDecision( etoData.weatherProvider, prev.lastScale, last ),
+				rawData: lateBudgetKc ? withLateBudgetKcFlag( rawData, overrideKc, last.demandKc ) : rawData,
 				wateringData: etoData
 			};
 		}
@@ -165,7 +175,11 @@ async function calculateWaterBudgetScale(
 	);
 	let demandKc = resolvedKc.kc;
 	if ( !Number.isFinite( demandKc ) || demandKc <= 0 ) demandKc = referenceKc;
-	const kcSource: string | undefined = resolvedKc.factors && resolvedKc.factors.source;
+	let kcSource: string | undefined = resolvedKc.factors && resolvedKc.factors.source;
+	if ( overrideKc !== undefined ) {
+		demandKc = overrideKc;
+		kcSource = "override-budget";
+	}
 
 	const { state, scale, reason } = step( prev, {
 		today, eto, precip: etoData.precip, referenceEto, resolvedLocation: undefined,
@@ -177,7 +191,10 @@ async function calculateWaterBudgetScale(
 	return {
 		scale,
 		rawData: last
-			? buildRawDataFromDecision( etoData.weatherProvider, scale, last )
+			? {
+				...buildRawDataFromDecision( etoData.weatherProvider, scale, last ),
+				...( kcSource === "override-budget" ? { budgetKcApplied: true } : {} )
+			}
 			: ( () => {
 				const raw: any = {
 					wp: etoData.weatherProvider,
@@ -189,6 +206,7 @@ async function calculateWaterBudgetScale(
 					reason
 				};
 				if ( kcSource && kcSource !== "budget" ) { raw.kc = round( demandKc, 2 ); raw.kcSource = kcSource; }
+				if ( kcSource === "override-budget" ) raw.budgetKcApplied = true;
 				return raw;
 			} )(),
 		wateringData: etoData

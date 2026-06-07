@@ -56,4 +56,8 @@ export interface AdjustmentOptions {
 	provider?: string;
 	/** Per-request fallback provider chain (array or CSV) overriding WEATHER_PROVIDER_FALLBACKS. */
 	fallbacks?: string | string[];
+	/** WaterBudget-only per-request crop coefficient override. */
+	budgetKc?: number;
+	/** WaterBudget-only per-request max-scale override. Parsed surface only; P1 wires output clamp behavior. */
+	budgetMaxScale?: number;
 }

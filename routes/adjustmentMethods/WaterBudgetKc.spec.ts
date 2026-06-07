@@ -34,6 +34,82 @@ function withEnv( vars: { [ k: string ]: string | undefined }, fn: () => Promise
 }
 
 describe( "WaterBudget per-plant Kc", () => {
+	it( "applies a per-request budgetKc override to demand and flags it", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: undefined, BUDGET_KC: "0.9" }, async () => {
+			const res: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetKc: 0.4 } as any, [ 42.45, -72.45 ], new StubProvider( etoData() )
+			);
+			expect( res.rawData.kcSource ).to.equal( "override-budget" );
+			expect( res.rawData.budgetKcApplied ).to.equal( true );
+			expect( res.rawData.kc ).to.equal( 0.4 );
+			expect( res.rawData.etc ).to.be.closeTo( res.rawData.eto * 0.4, 0.02 );
+		} );
+	} );
+
+	it( "flags a late same-day budgetKc override without recomputing", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: undefined, BUDGET_KC: "0.9" }, async () => {
+			const coords: [ number, number ] = [ 42.46, -72.46 ];
+			const first: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetKc: 0.3 } as any, coords, new StubProvider( etoData() )
+			);
+			const second: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetKc: 0.8 } as any, coords, new StubProvider( etoData({ minTemp: 70, maxTemp: 105, precip: 2 }) )
+			);
+			const state = await getBudgetState( coords );
+
+			expect( second.scale ).to.equal( first.scale );
+			expect( second.rawData.scale ).to.equal( first.rawData.scale );
+			expect( second.rawData.kcSource ).to.equal( "override-budget" );
+			expect( second.rawData.kc ).to.equal( 0.3 );
+			expect( second.rawData.budgetKcApplied ).to.equal( false );
+			expect( second.rawData.budgetKcLockedForToday ).to.equal( true );
+			expect( second.rawData.reason ).to.contain( "locked for today" );
+			expect( state!.history.length ).to.equal( 1 );
+			expect( state!.history[ 0 ].demandKc ).to.equal( 0.3 );
+		} );
+	} );
+
+	it( "falls back when per-request budgetKc is junk", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: undefined, BUDGET_KC: "0.9" }, async () => {
+			const blank: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetKc: "" } as any, [ 42.47, -72.47 ], new StubProvider( etoData() )
+			);
+			const bool: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetKc: false } as any, [ 42.48, -72.48 ], new StubProvider( etoData() )
+			);
+			const nan: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetKc: NaN } as any, [ 42.49, -72.49 ], new StubProvider( etoData() )
+			);
+
+			for ( const res of [ blank, bool, nan ] ) {
+				expect( res.rawData.kcSource ).to.equal( undefined );
+				expect( res.rawData.budgetKcApplied ).to.equal( undefined );
+				expect( res.rawData.etc ).to.be.closeTo( res.rawData.eto * 0.9, 0.02 );
+			}
+		} );
+	} );
+
+	it( "preserves a low but valid per-request budgetKc", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: "0.9", BUDGET_KC: "0.9" }, async () => {
+			const res: any = await WaterBudgetAdjustmentMethod.calculateWateringScale(
+				{ ...opts, budgetKc: 0.2 } as any, [ 42.52, -72.52 ], new StubProvider( etoData() )
+			);
+			expect( res.rawData.kcSource ).to.equal( "override-budget" );
+			expect( res.rawData.kc ).to.equal( 0.2 );
+			expect( res.rawData.etc ).to.be.closeTo( res.rawData.eto * 0.2, 0.02 );
+		} );
+	} );
+
+	it( "keeps no-override behavior unchanged", async () => {
+		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: undefined, BUDGET_KC: "0.9" }, async () => {
+			const res: any = await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, [ 42.53, -72.53 ], new StubProvider( etoData() ) );
+			expect( res.rawData.kc ).to.equal( undefined );
+			expect( res.rawData.kcSource ).to.equal( undefined );
+			expect( res.rawData.budgetKcApplied ).to.equal( undefined );
+			expect( res.rawData.etc ).to.be.closeTo( res.rawData.eto * 0.9, 0.02 );
+		} );
+	} );
+
 	it( "applies a BUDGET_CUSTOM_CROP_COEFFICIENT override to demand and flags it", async () => {
 		await withEnv( { BUDGET_PLANT_TYPE: undefined, BUDGET_CUSTOM_CROP_COEFFICIENT: "0.3" }, async () => {
 			const res: any = await WaterBudgetAdjustmentMethod.calculateWateringScale( opts, [ 42.41, -72.41 ], new StubProvider( etoData() ) );
