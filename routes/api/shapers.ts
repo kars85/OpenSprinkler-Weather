@@ -13,6 +13,7 @@ export function shapeWateringResponse( d: WateringDecision ): any {
 		skip: d.skip,
 		skipReason: d.skipReason !== undefined ? d.skipReason : null,
 		pwsBypassed: d.pwsBypassed,
+		restricted: d.restricted,
 		weatherProvider: d.weatherProvider,
 		reason: raw.reason !== undefined ? raw.reason : null,
 		raw: d.rawData
