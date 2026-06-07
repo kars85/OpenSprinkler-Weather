@@ -67,7 +67,8 @@ function numOr( raw: any, fallback: number ): number {
  */
 export function resolveSkipConfig(
 	adjustmentOptions: { [ k: string ]: any },
-	env: { [ k: string ]: string | undefined } = process.env as any
+	env: { [ k: string ]: string | undefined } = process.env as any,
+	forceRain: boolean = false
 ): SkipConfig {
 	const o = adjustmentOptions || {};
 	const enabled = ( wtoKey: string, envKey: string ): boolean =>
@@ -79,5 +80,6 @@ export function resolveSkipConfig(
 	if ( enabled( "skipFreeze", "SKIP_FREEZE" ) ) cfg.freeze = { temp: value( "skipFreezeTemp", "FREEZE_TEMP", 32 ) };
 	if ( enabled( "skipWind", "SKIP_WIND" ) ) cfg.wind = { max: value( "skipWindMax", "WIND_MAX", 25 ) };
 	if ( enabled( "skipRain", "SKIP_RAIN" ) ) cfg.rain = { threshold: value( "skipRainThreshold", "RAIN_SKIP", 0.1 ) };
+	if ( forceRain && !cfg.rain ) cfg.rain = { threshold: value( "skipRainThreshold", "RAIN_SKIP", 0.1 ) };
 	return cfg;
 }

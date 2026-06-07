@@ -64,9 +64,10 @@ export async function fetchSkipWeather(
  */
 export async function applyWeatherSkips(
 	dataToSend: any, weatherProvider: WeatherProvider, coordinates: GeoCoordinates,
-	pws: PWS | undefined, adjustmentOptions: AdjustmentOptions, now: number = Date.now()
+	pws: PWS | undefined, adjustmentOptions: AdjustmentOptions, now: number = Date.now(),
+	forceRain: boolean = false
 ): Promise< any > {
-	const cfg = resolveSkipConfig( adjustmentOptions || {} );
+	const cfg = resolveSkipConfig( adjustmentOptions || {}, process.env as any, forceRain );
 	if ( !anySkipEnabled( cfg ) ) return dataToSend;
 	const weather = await fetchSkipWeather( weatherProvider, coordinates, pws, adjustmentOptions, now );
 	if ( !weather ) return dataToSend; // fail-open: no usable weather

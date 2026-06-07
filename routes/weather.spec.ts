@@ -102,7 +102,11 @@ describe( 'resolveWeatherProvider', () => {
 } );
 
 describe('Watering Data', () => {
-    beforeEach(() => MockDate.set('5/13/2019'));
+    beforeEach(() => {
+        MockDate.set('5/13/2019');
+        const { __clearSkipWeatherMemo } = require('./skips/SkipGuard');
+        __clearSkipWeatherMemo();
+    });
 
     it('computeWateringDecision returns a clean decision object reflecting the served provider', async () => {
         mockGeocoder();
@@ -193,6 +197,52 @@ describe('Watering Data', () => {
         } finally {
             if ( saved === undefined ) { delete process.env.SKIP_FREEZE; } else { process.env.SKIP_FREEZE = saved; }
         }
+    });
+
+    it('restriction bit force-enables the rain skip (scale 0 + rain reason)', async () => {
+        mockGeocoder();
+        mockOWMWatering(); // method (Zimmerman) data
+        // The skip overlay then calls OWM.getWeatherData -> a wet day.
+        nock('https://api.openweathermap.org')
+            .get('/data/3.0/onecall').query(true)
+            .reply(200, {
+                current: { temp: 60, humidity: 80, wind_speed: 3, weather: [ { id: 500, main: 'Rain', description: 'rain', icon: '10d' } ] },
+                daily: [ { dt: 1557705600, temp: { min: 55, max: 70 }, rain: 12.7, weather: [ { id: 500, main: 'Rain', description: 'rain', icon: '10d' } ] } ]
+            });
+        const expressMocks = createExpressMocks(1 | (1 << 7), location, '"provider":"OWM"');
+        await getWateringData(expressMocks.request, expressMocks.response);
+        const body: any = expressMocks.response._getJSON();
+        expect( body.scale ).to.equal( 0 );
+        expect( body.rawData.skip ).to.equal( 1 );
+        expect( body.rawData.skipReason ).to.be.a('string').and.contain('rain');
+    });
+
+    it('applies the rain restriction LIVE over a cached method result (not a cached 0)', async () => {
+        const { __clearSkipWeatherMemo } = require('./skips/SkipGuard');
+        const loc = '42.3732,-72.5199';
+        const param = 4 | (1 << 7); // WaterBudget (caches) + restriction bit
+
+        // Request 1: ETo (cached after) + WET skip-weather -> rain skip -> scale 0.
+        mockOpenMeteoETo(); // getEToData (forecast hourly), once
+        nock('https://api.open-meteo.com').get('/v1/forecast').query(true).once().reply(200, {
+            current_weather: { temperature: 60, windspeed: 3, weathercode: 61 },
+            daily: { time: [ 1557705600 ], temperature_2m_min: [ 55 ], temperature_2m_max: [ 70 ], precipitation_sum: [ 0.5 ], weathercode: [ 61 ] }
+        });
+        const a = createExpressMocks(param, loc, '"provider":"OpenMeteo"');
+        await getWateringData(a.request, a.response);
+        expect( a.response._getJSON().scale ).to.equal( 0 );
+        expect( a.response._getJSON().rawData.skip ).to.equal( 1 );
+
+        // Request 2: same day/coords -> method CACHE HIT (no ETo call). Fresh DRY skip-weather -> no skip.
+        __clearSkipWeatherMemo();
+        nock('https://api.open-meteo.com').get('/v1/forecast').query(true).once().reply(200, {
+            current_weather: { temperature: 60, windspeed: 3, weathercode: 1 },
+            daily: { time: [ 1557705600 ], temperature_2m_min: [ 55 ], temperature_2m_max: [ 70 ], precipitation_sum: [ 0 ], weathercode: [ 1 ] }
+        });
+        const b = createExpressMocks(param, loc, '"provider":"OpenMeteo"');
+        await getWateringData(b.request, b.response);
+        // The cached method result was NOT pre-restricted: a dry cache-hit applies no skip.
+        expect( b.response._getJSON().rawData.skip ).to.equal( undefined );
     });
 });
 

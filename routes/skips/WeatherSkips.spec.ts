@@ -76,3 +76,23 @@ describe( "WeatherSkips.resolveSkipConfig", () => {
 		expect( cfg ).to.deep.equal( { wind: { max: 18 } } );
 	} );
 } );
+
+describe( "WeatherSkips.resolveSkipConfig forceRain", () => {
+	it( "force-enables rain when no rain config is present (threshold env/wto/default)", () => {
+		expect( resolveSkipConfig( {}, {}, true ) ).to.deep.equal( { rain: { threshold: 0.1 } } );
+		expect( resolveSkipConfig( {}, { RAIN_SKIP: "0.25" }, true ) ).to.deep.equal( { rain: { threshold: 0.25 } } );
+		expect( resolveSkipConfig( { skipRainThreshold: 0.3 }, { RAIN_SKIP: "0.25" }, true ) ).to.deep.equal( { rain: { threshold: 0.3 } } );
+	} );
+
+	it( "force-enables rain even when skipRain is explicitly off", () => {
+		expect( resolveSkipConfig( {}, { SKIP_RAIN: "false" }, true ) ).to.deep.equal( { rain: { threshold: 0.1 } } );
+	} );
+
+	it( "does not override an already-enabled rain config", () => {
+		expect( resolveSkipConfig( { skipRain: "on", skipRainThreshold: 0.5 }, {}, true ) ).to.deep.equal( { rain: { threshold: 0.5 } } );
+	} );
+
+	it( "forceRain defaults to false (adds no rain rule)", () => {
+		expect( resolveSkipConfig( {}, {} ) ).to.deep.equal( {} );
+	} );
+} );

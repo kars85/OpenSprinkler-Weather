@@ -6,7 +6,7 @@ import * as moment from "moment-timezone";
 import * as geoTZ from "geo-tz";
 import { ParsedQs } from "qs";
 
-import { BaseWateringData, GeoCoordinates, PWS, TimeData, WeatherData } from "../types";
+import { GeoCoordinates, PWS, TimeData, WeatherData } from "../types";
 import { WeatherProvider } from "./weatherProviders/WeatherProvider";
 import { AdjustmentMethod, AdjustmentMethodResponse, AdjustmentOptions } from "./adjustmentMethods/AdjustmentMethod";
 import WateringScaleCache, { CachedScale } from "../WateringScaleCache";
@@ -274,12 +274,6 @@ export function buildPwsFromParams( adjustmentOptions: AdjustmentOptions ): PWS 
 	return undefined;
 }
 
-export function checkWeatherRestriction( adjustmentValue: number, weather: BaseWateringData ): boolean {
-	const californiaRestriction = ( adjustmentValue >> 7 ) & 1;
-	if ( californiaRestriction && weather.precip > 0.1 ) return true;
-	return false;
-}
-
 export interface WateringDecisionInput {
 	coordinates: GeoCoordinates;
 	adjustmentParam: number;
@@ -336,15 +330,6 @@ export async function computeWateringDecision( input: WateringDecisionInput ): P
 		decision.rd = adjustmentMethodResponse.rainDelay;
 		decision.rawData = adjustmentMethodResponse.rawData;
 
-		if ( checkRestrictions ) {
-			let wateringDataForRestriction: BaseWateringData | undefined = adjustmentMethodResponse.wateringData;
-			if ( !wateringDataForRestriction ) {
-				wateringDataForRestriction = await weatherProvider.getWateringData( coordinates, pws );
-			}
-			if ( wateringDataForRestriction && checkWeatherRestriction( adjustmentParam, wateringDataForRestriction ) ) {
-				decision.scale = 0;
-			}
-		}
 		if ( ( weatherProvider as any ).pwsBypassed && decision.rawData ) {
 			decision.rawData = {
 				...decision.rawData,
@@ -358,7 +343,7 @@ export async function computeWateringDecision( input: WateringDecisionInput ): P
 		}
 	}
 
-	decision = await applyWeatherSkips( decision, weatherProvider, coordinates, pws, adjustmentOptions );
+	decision = await applyWeatherSkips( decision, weatherProvider, coordinates, pws, adjustmentOptions, undefined, checkRestrictions );
 
 	const rawData = decision.rawData || {};
 	return {

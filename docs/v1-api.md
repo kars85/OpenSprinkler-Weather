@@ -9,8 +9,11 @@ HTTP status codes with a `{ "error": { "code", "message" } }` body.
 Returns the same watering decision the firmware would receive, as clean JSON.
 
 Query: `loc` (required), `method` (required, integer 0–4: 0 manual, 1 zimmerman, 2 rainDelay,
-3 eto, 4 waterBudget), `restrict` (optional `1`/`true` — applies the rain restriction),
-`provider`, `pws`, `key` (optional).
+3 eto, 4 waterBudget), `provider`, `pws`, `key` (optional).
+
+`restrict` (optional `1`/`true`) — force-enables the rain skip (skip watering when recent precip
+≥ `RAIN_SKIP`, default 0.1in), evaluated live and fail-open. Equivalent to the firmware's rain
+restriction bit. When it fires, the response has `skip: true` + a rain `skipReason`.
 
 ```json
 { "location":[42.37,-72.52], "method":"waterBudget", "methodId":4, "scale":80,

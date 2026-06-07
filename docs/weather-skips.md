@@ -32,3 +32,15 @@ also be overridden per request via `wto` options: `skipFreeze` / `skipFreezeTemp
 When a guard fires, the response sets `scale = 0` and adds `rawData.skip = 1` and a
 human-readable `rawData.skipReason` (e.g. `freeze: 28F at or below 32F`). If weather data
 is unavailable, the guards do nothing (watering proceeds) — they never block on missing data.
+
+## Relationship to the firmware "rain restriction"
+
+The OpenSprinkler firmware's rain/weather restriction (the adjustment-method restriction bit,
+and `restrict=1` on the `/v1` API) is a **convenience alias for the rain skip**: when set, it
+force-enables the rain rule above using the same `RAIN_SKIP` threshold (default 0.1in), even if
+`SKIP_RAIN` is otherwise off. It is evaluated **live on every request** (not cached) and is
+**fail-open** — if weather is unavailable, watering proceeds. When it fires, the response carries
+the same `rawData.skip` / `rawData.skipReason` as any other rain skip.
+
+Calendar restrictions (even/odd day, day-of-week, monthly/seasonal) are handled by the firmware's
+own program scheduling, not by this service.
