@@ -262,6 +262,23 @@ function getTimeDataForCoordinates( coordinates: GeoCoordinates ): TimeData {
 	};
 }
 
+/**
+ * Bundles the OS-encoded time fields the legacy watering response carries (tz, sunrise, sunset, eip)
+ * so the /v1 watering endpoint can emit them as an ADDITIVE superset. Encoding matches the legacy
+ * path exactly: tz via getTimezone(offsetMinutes), sunrise/sunset in local minutes, eip from the
+ * caller's IP. Consumed by the OpenSprinkler-Firmware /v1 adapter (weather.cpp parseV1Weather).
+ */
+export interface OsTimeFields { tz: number; sunrise: number; sunset: number; eip: number; }
+export function getOsTimeFields( coordinates: GeoCoordinates, remoteIp: string ): OsTimeFields {
+	const td: TimeData = getTimeDataForCoordinates( coordinates );
+	return {
+		tz: getTimezone( td.timezone, false ),
+		sunrise: td.sunrise,
+		sunset: td.sunset,
+		eip: ipToInt( remoteIp || "" )
+	};
+}
+
 const METHOD_NAMES: { [ id: number ]: string } = {
 	0: "manual", 1: "zimmerman", 2: "rainDelay", 3: "eto", 4: "waterBudget"
 };

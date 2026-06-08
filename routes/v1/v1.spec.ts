@@ -30,7 +30,7 @@ describe( '/v1/watering', () => {
 	beforeEach( () => MockDate.set( '5/13/2019' ) );
 	afterEach( () => { MockDate.reset(); nock.cleanAll(); } );
 
-	it( 'returns a clean watering decision with no legacy fields', async () => {
+	it( 'returns a clean watering decision and the OS time-field superset', async () => {
 		mockOWMWatering();
 		const { request, response } = reqRes( { loc: COORDS, method: '1', provider: 'OWM' } );
 		await v1Watering( request, response );
@@ -41,10 +41,16 @@ describe( '/v1/watering', () => {
 		expect( body.scale ).to.be.a( 'number' );
 		expect( body.weatherProvider ).to.be.a( 'string' );
 		expect( body.location ).to.eql( [ 42.3732, -72.5199 ] );
-		// No legacy-shaped fields.
-		for ( const k of [ 'errCode', 'rd', 'tz', 'sunrise', 'eip' ] ) {
-			expect( body[ k ], `legacy field ${ k } leaked` ).to.equal( undefined );
+		// Still uses clean camelCase decision fields, NOT the legacy `errCode`/`rd` names.
+		for ( const k of [ 'errCode', 'rd' ] ) {
+			expect( body[ k ], `legacy-named field ${ k } leaked` ).to.equal( undefined );
 		}
+		// Additive superset: /v1/watering now also carries the OS-encoded time fields the firmware
+		// applies (tz/sunrise/sunset/eip), so a single call covers the full effect-contract.
+		expect( body.tz ).to.be.a( 'number' );
+		expect( body.sunrise ).to.be.within( 0, 1440 );
+		expect( body.sunset ).to.be.within( 0, 1440 );
+		expect( body.eip ).to.be.a( 'number' );
 	} );
 
 	it( 'rejects a missing method with 400', async () => {
