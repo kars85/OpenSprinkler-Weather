@@ -3,7 +3,7 @@ import { GeoCoordinates, PWS } from "../../types";
 import { AdjustmentOptions } from "../adjustmentMethods/AdjustmentMethod";
 import { getBudgetState } from "../adjustmentMethods/WaterBudgetAdjustmentMethod";
 import {
-	buildPwsFromParams, computeWateringDecision, getParameter,
+	buildPwsFromParams, computeWateringDecision, getOsTimeFields, getParameter,
 	redactLogString, resolveCoordinates, resolveWeatherProvider
 } from "../weather";
 import { CodedError, ErrorCode, makeCodedError } from "../../errors";
@@ -66,7 +66,11 @@ export const v1Watering = async function ( req: express.Request, res: express.Re
 		const coordinates: GeoCoordinates = await resolveCoordinates( loc );
 		const pws = resolvePwsOrThrow( adjustmentOptions );
 		const decision = await computeWateringDecision( { coordinates, adjustmentParam, adjustmentOptions, pws } );
-		res.json( shapeWateringResponse( decision ) );
+		// Additive superset: also emit the OS-encoded time fields (tz/sunrise/sunset/eip) the legacy
+		// response carries, so a single /v1/watering call covers the full firmware effect-contract.
+		const remoteIp = getParameter( req.headers[ "x-forwarded-for" ] ) || req.connection?.remoteAddress || "";
+		const time = getOsTimeFields( coordinates, remoteIp );
+		res.json( shapeWateringResponse( decision, time ) );
 	} catch ( err ) {
 		sendV1Error( res, err );
 	}

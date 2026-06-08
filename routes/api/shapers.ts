@@ -1,9 +1,9 @@
 import { GeoCoordinates } from "../../types";
-import { WateringDecision } from "../weather";
+import { WateringDecision, OsTimeFields } from "../weather";
 
-export function shapeWateringResponse( d: WateringDecision ): any {
+export function shapeWateringResponse( d: WateringDecision, time?: OsTimeFields ): any {
 	const raw = d.rawData || {};
-	return {
+	const out: any = {
 		location: d.coordinates,
 		method: d.methodName,
 		methodName: d.methodName,
@@ -18,6 +18,15 @@ export function shapeWateringResponse( d: WateringDecision ): any {
 		reason: raw.reason !== undefined ? raw.reason : null,
 		raw: d.rawData
 	};
+	// Additive superset: carry the OS-encoded time fields the legacy response also emits
+	// (tz/sunrise/sunset/eip) so a single /v1/watering call covers the full firmware effect-contract.
+	if ( time ) {
+		out.tz = time.tz;
+		out.sunrise = time.sunrise;
+		out.sunset = time.sunset;
+		out.eip = time.eip;
+	}
+	return out;
 }
 
 export function shapeWeatherResponse( coordinates: GeoCoordinates, weather: any ): any {
