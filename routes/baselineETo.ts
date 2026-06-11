@@ -27,7 +27,9 @@ readFileHeader().then( ( fileMeta ) => {
 
 export const getBaselineETo = async function( req: express.Request, res: express.Response ) {
     console.log("DEBUG: getBaselineETo called with query:", req.query);
-	const { getParameter, resolveCoordinates } = require( "./weather" );
+	// Dynamic import (not static) breaks the weather<->baselineETo module cycle: a static import
+	// re-enters weather.ts before its ADJUSTMENT_METHOD registry is built. Deferred to call time.
+	const { getParameter, resolveCoordinates } = await import( "./weather" );
 	const locationQueryParam = req.query.loc;
 	const location: string	= getParameter( locationQueryParam as string | string[] | undefined );
 

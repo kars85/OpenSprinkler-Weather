@@ -9,6 +9,7 @@ process.env.WEATHER_PROVIDER = "OWM";
 process.env.OWM_API_KEY = "NO_KEY";
 
 import { computeWateringDecision, convertToLegacyFormat, getWateringData, resolveWeatherProvider } from './weather';
+import { __clearSkipWeatherMemo } from './skips/SkipGuard';
 import { GeoCoordinates, WeatherData, ZimmermanWateringData } from "../types";
 import { WeatherProvider } from "./weatherProviders/WeatherProvider";
 import { EToData } from "./adjustmentMethods/EToAdjustmentMethod";
@@ -127,14 +128,12 @@ describe( 'resolveWeatherProvider', () => {
 describe('Watering Data', () => {
     beforeEach(() => {
         MockDate.set('5/13/2019');
-        const { __clearSkipWeatherMemo } = require('./skips/SkipGuard');
         __clearSkipWeatherMemo();
     });
 
     it('computeWateringDecision returns a clean decision object reflecting the served provider', async () => {
         mockGeocoder();
         mockOWMWatering();
-        const { computeWateringDecision } = require('./weather');
         const decision: any = await computeWateringDecision({
             coordinates: [ 42.3732, -72.5199 ],
             adjustmentParam: 1,                       // Zimmerman, no restriction bit
@@ -242,7 +241,6 @@ describe('Watering Data', () => {
     });
 
     it('applies the rain restriction LIVE over a cached method result (not a cached 0)', async () => {
-        const { __clearSkipWeatherMemo } = require('./skips/SkipGuard');
         const loc = '42.3732,-72.5199';
         const param = 4 | (1 << 7); // WaterBudget (caches) + restriction bit
 
