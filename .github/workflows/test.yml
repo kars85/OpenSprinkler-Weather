@@ -1,0 +1,28 @@
+name: test
+
+# Dedicated test gate (separate from docker-publish so tests fail fast, before packaging).
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Node 22 = LTS floor (minimum supported); 24 = CI primary; 26 = current dev.
+        node-version: [ 22.x, 24.x, 26.x ]
+    name: test (Node ${{ matrix.node-version }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test
+        run: npm test
