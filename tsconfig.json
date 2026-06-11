@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "es5",
     "esModuleInterop": true,
+    "types": [ "node", "vitest/globals" ],
     "noImplicitReturns": true,
     "noEmitOnError": true,
     "outDir": "js/",

@@ -1,6 +1,0 @@
-{
-  "node-option": ["no-experimental-strip-types"],
-  "require": ["ts-node/register", "./test/setup-env.ts"],
-  "spec": "{routes,test,mqtt,public}/**/*.spec.ts",
-  "exit": true
-}

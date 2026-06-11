@@ -19,19 +19,58 @@ import { CodedError, ErrorCode, makeCodedError } from "../errors";
 import { Geocoder } from "./geocoders/Geocoder";
 import { applyWeatherSkips } from "./skips/SkipGuard";
 import { buildFallbackChain, FallbackWeatherProvider, isPwsFallbackEnabled, parseFallbackKeys } from "./weatherProviders/FallbackWeatherProvider";
+// Static provider/geocoder imports + registries replace runtime require("./..."+env) so the module
+// graph is statically analyzable (vite/vitest) and explicit for the production build.
+import AccuWeather from "./weatherProviders/AccuWeather";
+import PirateWeather from "./weatherProviders/PirateWeather";
+import Apple from "./weatherProviders/Apple";
+import OWM from "./weatherProviders/OWM";
+import OpenMeteo from "./weatherProviders/OpenMeteo";
+import DWD from "./weatherProviders/DWD";
+import WUnderground from "./weatherProviders/WUnderground";
+import LocalWeatherProvider from "./weatherProviders/local";
+import WUndergroundGeocoder from "./geocoders/WUnderground";
+import GoogleMaps from "./geocoders/GoogleMaps";
 
-const WEATHER_PROVIDERS: { [method: string] : WeatherProvider} = {
-	"AW": new ( require("./weatherProviders/AccuWeather" ).default )(),
-	"PW": new ( require("./weatherProviders/PirateWeather" ).default )(),
-	"Apple": new ( require("./weatherProviders/Apple" ).default )(),
-	"OWM": new ( require("./weatherProviders/OWM" ).default )(),
-	"OpenMeteo": new ( require("./weatherProviders/OpenMeteo" ).default )(),
-	"DWD": new ( require("./weatherProviders/DWD" ).default )(),
-	"WU": new ( require("./weatherProviders/WUnderground" ).default )(),
-  };
+/** Name → ctor for the env-selected PWS provider / geocoder (was a runtime `require("./..."+env)`). */
+const PWS_PROVIDER_REGISTRY: { [ name: string ]: new () => WeatherProvider } = {
+	WUnderground, AccuWeather, PirateWeather, Apple, OWM, OpenMeteo, DWD,
+};
+const GEOCODER_REGISTRY: { [ name: string ]: new () => Geocoder } = {
+	WUnderground: WUndergroundGeocoder, GoogleMaps,
+};
 
-const PWS_WEATHER_PROVIDER: WeatherProvider = new ( require("./weatherProviders/" + ( process.env.PWS_WEATHER_PROVIDER || "WUnderground" ) ).default )();
-const GEOCODER: Geocoder = new ( require("./geocoders/" + ( process.env.GEOCODER || "WUnderground" ) ).default )();
+// Instantiate providers/geocoder lazily (first use), not at module load. Providers import helpers
+// from this module (httpJSONRequest, etc.), so eager `new AccuWeather()` at load can run mid
+// import-cycle (vite/ESM) before the class is initialized. Deferring to first request — after the
+// whole graph is loaded — avoids that without a util-extraction refactor.
+let _weatherProviders: { [ method: string ]: WeatherProvider } | undefined;
+function weatherProviders(): { [ method: string ]: WeatherProvider } {
+	if ( !_weatherProviders ) {
+		_weatherProviders = {
+			"AW": new AccuWeather(),
+			"PW": new PirateWeather(),
+			"Apple": new Apple(),
+			"OWM": new OWM(),
+			"OpenMeteo": new OpenMeteo(),
+			"DWD": new DWD(),
+			"WU": new WUnderground(),
+		};
+	}
+	return _weatherProviders;
+}
+
+let _pwsWeatherProvider: WeatherProvider | undefined;
+function pwsWeatherProvider(): WeatherProvider {
+	if ( !_pwsWeatherProvider ) _pwsWeatherProvider = new ( PWS_PROVIDER_REGISTRY[ process.env.PWS_WEATHER_PROVIDER || "WUnderground" ] )();
+	return _pwsWeatherProvider;
+}
+
+let _geocoder: Geocoder | undefined;
+function geocoder(): Geocoder {
+	if ( !_geocoder ) _geocoder = new ( GEOCODER_REGISTRY[ process.env.GEOCODER || "WUnderground" ] )();
+	return _geocoder;
+}
 
 /**
  * Select the WeatherProvider for a request. Returns a bare provider when no fallback chain is
@@ -44,15 +83,15 @@ export function resolveWeatherProvider(
 	pws: PWS | undefined
 ): WeatherProvider {
 	if ( process.env.WEATHER_PROVIDER === "local" ) {
-		return new ( require( "./weatherProviders/local" ).default )();
+		return new LocalWeatherProvider();
 	}
-	const lookup = ( key: string ): WeatherProvider | undefined => WEATHER_PROVIDERS[ key ];
+	const lookup = ( key: string ): WeatherProvider | undefined => weatherProviders()[ key ];
 	if ( pws && pws.id ) {
-		if ( !isPwsFallbackEnabled() ) return PWS_WEATHER_PROVIDER;
-		const pwsChain = buildFallbackChain( PWS_WEATHER_PROVIDER, parseFallbackKeys( adjustmentOptions ), lookup );
-		return pwsChain.length > 1 ? new FallbackWeatherProvider( pwsChain, true ) : PWS_WEATHER_PROVIDER;
+		if ( !isPwsFallbackEnabled() ) return pwsWeatherProvider();
+		const pwsChain = buildFallbackChain( pwsWeatherProvider(), parseFallbackKeys( adjustmentOptions ), lookup );
+		return pwsChain.length > 1 ? new FallbackWeatherProvider( pwsChain, true ) : pwsWeatherProvider();
 	}
-	const primary = WEATHER_PROVIDERS[ adjustmentOptions.provider ] || WEATHER_PROVIDERS[ "Apple" ];
+	const primary = weatherProviders()[ adjustmentOptions.provider ] || weatherProviders()[ "Apple" ];
 	const chain = buildFallbackChain( primary, parseFallbackKeys( adjustmentOptions ), lookup );
 	return chain.length > 1 ? new FallbackWeatherProvider( chain, false ) : primary;
 }
@@ -241,7 +280,7 @@ export async function resolveCoordinates( location: string ): Promise< GeoCoordi
 		const split: string[] = location.split( "," );
 		return [ parseFloat( split[ 0 ] ), parseFloat( split[ 1 ] ) ];
 	}
-	return GEOCODER.getLocation( location );
+	return geocoder().getLocation( location );
 }
 
 export async function httpJSONRequest(url: string, headers?: any, body?: any, timeoutMs?: number): Promise< any > {
