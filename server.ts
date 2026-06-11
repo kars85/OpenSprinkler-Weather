@@ -1,8 +1,8 @@
 import { config as dotenv_config } from "dotenv"
 dotenv_config();
 
-import * as express from "express";
-import * as cors from "cors";
+import express from "express";
+import cors from "cors";
 import { default as helmet } from "helmet";
 import { rateLimit } from "express-rate-limit";
 import * as path from "path";

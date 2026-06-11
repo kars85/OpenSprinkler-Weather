@@ -2,8 +2,8 @@ import * as express from "express";
 import * as http from "http";
 import * as https from "https";
 import * as SunCalc from "suncalc";
-import * as moment from "moment-timezone";
-import * as geoTZ from "geo-tz";
+import moment from "moment-timezone";
+import geoTZ from "geo-tz";
 import { ParsedQs } from "qs";
 
 import { GeoCoordinates, PWS, TimeData, WeatherData } from "../types";

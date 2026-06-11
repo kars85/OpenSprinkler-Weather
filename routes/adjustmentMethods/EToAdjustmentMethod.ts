@@ -1,5 +1,5 @@
 import * as SunCalc from "suncalc";
-import * as moment from "moment";
+import moment from "moment";
 import { AdjustmentMethod, AdjustmentMethodResponse, AdjustmentOptions } from "./AdjustmentMethod";
 import { BaseWateringData, GeoCoordinates, PWS } from "../../types";
 import { WeatherProvider } from "../weatherProviders/WeatherProvider";

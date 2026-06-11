@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import * as nock from "nock";
+import nock from "nock";
 
 import { CodedError, ErrorCode } from "../errors";
 import { calculateETo, EToData } from "./adjustmentMethods/EToAdjustmentMethod";
