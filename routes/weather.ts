@@ -244,8 +244,8 @@ export async function resolveCoordinates( location: string ): Promise< GeoCoordi
 	return GEOCODER.getLocation( location );
 }
 
-export async function httpJSONRequest(url: string, headers?: any, body?: any): Promise< any > {
-	const data: string = await httpRequest(url, headers, body);
+export async function httpJSONRequest(url: string, headers?: any, body?: any, timeoutMs?: number): Promise< any > {
+	const data: string = await httpRequest(url, headers, body, timeoutMs);
 	return JSON.parse(data);
 }
 
@@ -592,12 +592,16 @@ function encodeLegacyWateringValue( value: any ): string | undefined {
 	}
 }
 
-async function httpRequest( url: string, headers?: any, body?: any ): Promise< string > {
+async function httpRequest( url: string, headers?: any, body?: any, timeoutMs?: number ): Promise< string > {
 	return new Promise< string >( ( resolve, reject ) => {
 		const urlMatch = url.match( filters.url );
 		if (!urlMatch) return reject(new Error(`Invalid URL format: ${redactLogString(url)}`));
+		// Per-call override (e.g. the OpenMeteo forecast fetch passes a tight bound so a slow upstream
+		// fails fast and falls back, well inside the firmware's 5s read deadline) > env default > 10s.
 		const configuredTimeoutMs = Number(process.env.HTTP_REQUEST_TIMEOUT_MS);
-		const requestTimeoutMs = Number.isSafeInteger(configuredTimeoutMs) && configuredTimeoutMs > 0 ? configuredTimeoutMs : 10000;
+		const requestTimeoutMs = Number.isSafeInteger(timeoutMs) && timeoutMs! > 0
+			? timeoutMs!
+			: Number.isSafeInteger(configuredTimeoutMs) && configuredTimeoutMs > 0 ? configuredTimeoutMs : 10000;
 		
 		const isHttps = url.startsWith("https");
 		const options: https.RequestOptions = {

@@ -8,6 +8,18 @@ import { normalizeWeatherData } from "./normalizeWeatherData";
 import { EToData, approximateSolarRadiation, CloudCoverInfo } from "../adjustmentMethods/EToAdjustmentMethod";
 import { CodedError, ErrorCode } from "../../errors";
 import { debugLog, httpJSONRequest } from "../weather";
+import ForecastCache from "./ForecastCache";
+
+/**
+ * Bound the OpenMeteo forecast fetch well inside the firmware's 5s read deadline so a slow upstream
+ * fails fast and falls back instead of stalling the device request (→ wterr=-4). Tunable via env.
+ */
+const FORECAST_FETCH_TIMEOUT_MS = Number( process.env.FORECAST_TIMEOUT_MS ) || 2500;
+/** Cache the forecast off the hot path; serve stale-if-error on a refresh failure. */
+const forecastCache = new ForecastCache< ForecastEToData[] >(
+	Number( process.env.FORECAST_CACHE_FRESH_MS ) || 3 * 60 * 60 * 1000,
+	Number( process.env.FORECAST_CACHE_STALE_MS ) || 6 * 60 * 60 * 1000,
+);
 
 // Constants
 const ONE_DAY_SECONDS = 24 * 60 * 60;
@@ -349,7 +361,16 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 		}
 
 		debugLog(`DEBUG: LocalWeatherProvider.getForecastData - Getting ${days} day forecast from OpenMeteo for coordinates:`, coordinates);
-		
+
+		// Hot path: a fresh cached forecast skips the upstream call entirely.
+		const cacheKey = `${coordinates[0]},${coordinates[1]}#${days}`;
+		const fresh = forecastCache.getFresh( cacheKey );
+		if ( fresh ) {
+			debugLog("DEBUG: forecast cache HIT (fresh) — no upstream fetch");
+			return fresh;
+		}
+
+		const startedAt = Date.now();
 		try {
 			// Use OpenMeteo for detailed forecast with all ETo parameters
 			const forecastUrl = `https://api.open-meteo.com/v1/forecast?` +
@@ -360,8 +381,8 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 				`forecast_days=${days}&timeformat=unixtime`;
 
 			debugLog("DEBUG: Forecast URL:", forecastUrl);
-			
-			const forecastData = await httpJSONRequest(forecastUrl);
+
+			const forecastData = await httpJSONRequest(forecastUrl, undefined, undefined, FORECAST_FETCH_TIMEOUT_MS);
 			debugLog("DEBUG: OpenMeteo forecast response keys:", Object.keys(forecastData));
 
 			if (!forecastData.daily || !forecastData.hourly) {
@@ -403,12 +424,19 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 				results.push(etoData);
 			}
 			
-			debugLog(`DEBUG: LocalWeatherProvider.getForecastData - Successfully retrieved ${results.length} days of forecast data`);
+			forecastCache.set( cacheKey, results );
+			debugLog(`DEBUG: forecast cache MISS — fetched ${results.length} days in ${Date.now() - startedAt}ms`);
 			return results;
-			
+
 		} catch (err) {
-			console.error('DEBUG: OpenMeteo forecast failed:', err.message);
-			// Don't throw here - let the enhanced ETo method handle the fallback
+			// Stale-if-error: a slightly-stale forecast is more accurate than dropping the forecast term.
+			const stale = forecastCache.getStale( cacheKey );
+			if ( stale ) {
+				console.warn(`Forecast refresh failed after ${Date.now() - startedAt}ms (${err.message}); serving stale-if-error forecast for ${cacheKey}.`);
+				return stale;
+			}
+			// True cold cache: re-throw so the enhanced ETo method falls back to local-only ETo.
+			console.error('DEBUG: OpenMeteo forecast failed with no cached fallback (ETo will use local-only):', err.message);
 			throw new CodedError(ErrorCode.WeatherApiError, `Forecast provider failed: ${err.message}`);
 		}
 	}
