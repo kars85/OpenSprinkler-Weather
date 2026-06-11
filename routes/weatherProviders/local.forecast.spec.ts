@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import * as nock from "nock";
+import nock from "nock";
 import * as MockDate from "mockdate";
 import LocalWeatherProvider from "./local";
 

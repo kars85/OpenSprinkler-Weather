@@ -1,5 +1,5 @@
 import * as express from "express";
-import * as moment from "moment";
+import moment from "moment";
 import * as fs from "fs";
 
 import { GeoCoordinates, WeatherData, ZimmermanWateringData, PWS } from "../../types";

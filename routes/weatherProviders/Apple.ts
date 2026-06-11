@@ -1,4 +1,4 @@
-import * as moment from "moment-timezone";
+import moment from "moment-timezone";
 import * as jwt from "jsonwebtoken";
 
 import { GeoCoordinates, WeatherData, ZimmermanWateringData, PWS } from "../../types"; // Added PWS for completeness, though not used by Apple provider directly

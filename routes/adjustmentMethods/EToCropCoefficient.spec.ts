@@ -1,4 +1,4 @@
-import * as moment from "moment";
+import moment from "moment";
 import { expect } from "chai";
 import { GeoCoordinates } from "../../types";
 import { WeatherProvider } from "../weatherProviders/WeatherProvider";
