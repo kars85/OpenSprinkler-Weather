@@ -4,9 +4,13 @@ import { expect } from "chai";
 process.env.WEATHER_PROVIDER = "OWM";
 process.env.OWM_API_KEY = "NO_KEY";
 
-import { convertToLegacyFormat } from "../routes/weather";
+import {
+	ADJUSTMENT_METHOD, LEGACY_RAWDATA_LIMIT, convertToLegacyFormat,
+	formatLegacyWateringData, resolveLegacyAdjustmentMethod
+} from "../routes/weather";
 import ManualAdjustmentMethod from "../routes/adjustmentMethods/ManualAdjustmentMethod";
 import ZimmermanAdjustmentMethod from "../routes/adjustmentMethods/ZimmermanAdjustmentMethod";
+import RainDelayAdjustmentMethod from "../routes/adjustmentMethods/RainDelayAdjustmentMethod";
 import EToAdjustmentMethod from "../routes/adjustmentMethods/EToAdjustmentMethod";
 import WaterBudgetAdjustmentMethod from "../routes/adjustmentMethods/WaterBudgetAdjustmentMethod";
 
@@ -28,9 +32,8 @@ import WaterBudgetAdjustmentMethod from "../routes/adjustmentMethods/WaterBudget
  */
 
 // Top-level keys the firmware reads or that are part of the frozen response shape.
-const ALLOWED_TOP_LEVEL = [ "scale", "rd", "tz", "sunrise", "sunset", "eip", "errCode", "rawData", "restricted" ];
+const ALLOWED_TOP_LEVEL = [ "scale", "rd", "tz", "sunrise", "sunset", "eip", "errCode", "rawData", "restricted", "scales" ];
 const REQUIRED_TOP_LEVEL = [ "scale", "tz", "sunrise", "sunset", "eip", "errCode" ];
-const RAWDATA_FIRMWARE_LIMIT = 319; // TMP_BUFFER_SIZE - 1
 
 function legacy( method: any, over: any = {} ): any {
 	return convertToLegacyFormat(
@@ -40,7 +43,28 @@ function legacy( method: any, over: any = {} ): any {
 }
 
 describe( "firmware legacy contract guard", () => {
-	const methods = [ ManualAdjustmentMethod, ZimmermanAdjustmentMethod, EToAdjustmentMethod, WaterBudgetAdjustmentMethod ];
+	const methods = [ ManualAdjustmentMethod, ZimmermanAdjustmentMethod, RainDelayAdjustmentMethod, EToAdjustmentMethod, WaterBudgetAdjustmentMethod ];
+
+	it( "pins request IDs 0-4 and masks only the bit-7 restriction flag", () => {
+		const expected = [ ManualAdjustmentMethod, ZimmermanAdjustmentMethod, RainDelayAdjustmentMethod, EToAdjustmentMethod, WaterBudgetAdjustmentMethod ];
+		expect( Object.keys( ADJUSTMENT_METHOD ) ).to.deep.equal( [ "0", "1", "2", "3", "4" ] );
+		for ( let id = 0; id < expected.length; id++ ) {
+			expect( resolveLegacyAdjustmentMethod( id ) ).to.equal( expected[ id ] );
+			expect( resolveLegacyAdjustmentMethod( id | 0x80 ) ).to.equal( expected[ id ] );
+		}
+		expect( resolveLegacyAdjustmentMethod( 5 ) ).to.equal( undefined );
+		expect( resolveLegacyAdjustmentMethod( 0x100 ) ).to.equal( undefined );
+	} );
+
+	it( "pins the final custom flat-wire encoding", () => {
+		const wire = formatLegacyWateringData( {
+			scale: 100,
+			rawData: { wp: "A B&C", note: "line\nbreak" },
+			label: "x y&z\nq",
+			omitted: undefined
+		} );
+		expect( wire ).to.equal( '&scale=100&rawData={"wp":"A+BAMPERSANDC","note":"line\\nbreak"}&label=x+yAMPERSANDz\\nq' );
+	} );
 
 	it( "emits no top-level key outside the firmware-known set (catches renames)", () => {
 		for ( const m of methods ) {
@@ -77,9 +101,39 @@ describe( "firmware legacy contract guard", () => {
 				pwsBypassReason: "errCode 12 " + "y".repeat( 300 )
 			}
 		} );
-		expect( JSON.stringify( out.rawData ).length ).to.be.lessThan( RAWDATA_FIRMWARE_LIMIT );
+		const rawValue = formatLegacyWateringData( out ).match( /&rawData=([^&]*)/ )?.[ 1 ] || "";
+		expect( Buffer.byteLength( rawValue, "utf8" ) ).to.be.at.most( LEGACY_RAWDATA_LIMIT );
 		expect( out.rawData.skip ).to.equal( 1 );
 		expect( out.rawData.pwsBypassed ).to.equal( 1 );
+	} );
+
+	it( "measures expansion after encoding, not pre-encoding JSON characters", () => {
+		const out = legacy( ManualAdjustmentMethod, {
+			rawData: { wp: "OWM", skip: 1, skipReason: "&".repeat( 40 ) }
+		} );
+		const rawValue = formatLegacyWateringData( out ).match( /&rawData=([^&]*)/ )?.[ 1 ] || "";
+		expect( Buffer.byteLength( rawValue, "utf8" ) ).to.be.at.most( LEGACY_RAWDATA_LIMIT );
+		expect( out.rawData.skip ).to.equal( 1 );
+		expect( out.rawData.skipReason ).to.equal( undefined );
+	} );
+
+	it( "retains an optional reason at the exact 319-byte boundary", () => {
+		const reason = "x".repeat( 282 );
+		const out = legacy( ManualAdjustmentMethod, {
+			rawData: { wp: "OWM", skip: 1, skipReason: reason }
+		} );
+		const rawValue = formatLegacyWateringData( out ).match( /&rawData=([^&]*)/ )?.[ 1 ] || "";
+		expect( Buffer.byteLength( rawValue, "utf8" ) ).to.equal( LEGACY_RAWDATA_LIMIT );
+		expect( out.rawData.skipReason ).to.equal( reason );
+	} );
+
+	it( "uses a compact safe fallback for non-trimmable oversized rawData", () => {
+		const out = legacy( ManualAdjustmentMethod, {
+			rawData: { wp: "x".repeat( 500 ), skip: 1, pwsBypassed: 1 }
+		} );
+		const rawValue = formatLegacyWateringData( out ).match( /&rawData=([^&]*)/ )?.[ 1 ] || "";
+		expect( Buffer.byteLength( rawValue, "utf8" ) ).to.be.at.most( LEGACY_RAWDATA_LIMIT );
+		expect( out.rawData ).to.deep.equal( { wp: "unknown", skip: 1, pwsBypassed: 1 } );
 	} );
 
 	it( "keeps WaterBudget late-lock observability under the firmware rawData buffer", () => {
@@ -102,10 +156,21 @@ describe( "firmware legacy contract guard", () => {
 				budgetMaxScaleApplied: true
 			}
 		} );
-		expect( JSON.stringify( out.rawData ).length ).to.be.lessThan( RAWDATA_FIRMWARE_LIMIT );
+		const rawValue = formatLegacyWateringData( out ).match( /&rawData=([^&]*)/ )?.[ 1 ] || "";
+		expect( Buffer.byteLength( rawValue, "utf8" ) ).to.be.at.most( LEGACY_RAWDATA_LIMIT );
 		expect( out.rawData.reason ).to.contain( "locked for today" );
 		expect( out.rawData.budgetKcRequested ).to.equal( 0.8 );
 		expect( out.rawData.budgetMaxScaleApplied ).to.equal( true );
+	} );
+
+	it( "pins RainDelay and the maximum reserved scales shape on the final wire", () => {
+		const rainDelayWire = formatLegacyWateringData( legacy( RainDelayAdjustmentMethod, { scale: undefined, rd: 24 } ) );
+		expect( rainDelayWire ).to.contain( "&rd=24" );
+		expect( rainDelayWire ).not.to.contain( "&scale=" );
+
+		const scales = Array.from( { length: 14 }, ( _, index ) => index * 10 );
+		const scalesWire = formatLegacyWateringData( legacy( ManualAdjustmentMethod, { scales } ) );
+		expect( scalesWire ).to.contain( `&scales=${ JSON.stringify( scales ) }` );
 	} );
 
 	it( "emits restricted only when set, as 0/1 (firmware wt_restricted)", () => {
