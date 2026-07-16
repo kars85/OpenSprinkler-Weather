@@ -25,7 +25,7 @@ import WaterBudgetAdjustmentMethod from "../routes/adjustmentMethods/WaterBudget
  *
  * Source of truth: docs/firmware-integration-requirements.md.
  * Firmware ranges (weather.cpp): scale 0..250 (:74), sunrise/sunset 0..1440 (:90/:99),
- * tz 0..108 (:117); rawData value must stay < 319 bytes (TMP_BUFFER_SIZE 320, :31).
+ * tz 0..108 (:117); rawData value must stay <= 319 bytes (TMP_BUFFER_SIZE 320, :31).
  *
  * RULE: the legacy contract is a FROZEN, additive-only public API. New data is additive and
  * size-bounded; never rename/remove a top-level key the firmware reads.
@@ -92,7 +92,7 @@ describe( "firmware legacy contract guard", () => {
 		expect( legacy( ManualAdjustmentMethod, { scale: 250 } ).scale ).to.be.within( 0, 250 );
 	} );
 
-	it( "keeps the rawData value under the firmware findKeyVal buffer (< 319 bytes), preserving flags", () => {
+	it( "keeps the rawData value within the firmware findKeyVal buffer (<= 319 bytes), preserving flags", () => {
 		const out = legacy( ManualAdjustmentMethod, {
 			scale: 0,
 			rawData: {
