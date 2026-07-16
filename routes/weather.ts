@@ -112,6 +112,11 @@ export const ADJUSTMENT_METHOD: { [ key: number ] : AdjustmentMethod } = {
 	4: WaterBudgetAdjustmentMethod
 };
 
+/** Resolve the frozen legacy request ID after removing the bit-7 restriction flag. */
+export function resolveLegacyAdjustmentMethod( adjustmentParam: number ): AdjustmentMethod | undefined {
+	return ADJUSTMENT_METHOD[ adjustmentParam & ~( 1 << 7 ) ];
+}
+
 const cache = new WateringScaleCache();
 const LEGACY_FIRMWARE_SUPPORT = process.env.LEGACY_FIRMWARE_SUPPORT !== 'false';
 const SIMPLIFIED_RESPONSE_FORMAT = process.env.SIMPLIFIED_RESPONSE_FORMAT !== 'false';
@@ -176,6 +181,7 @@ export function convertToLegacyFormat(enhancedData: any, adjustmentMethod: Adjus
 		sunrise: enhancedData.sunrise, sunset: enhancedData.sunset, eip: enhancedData.eip,
 		errCode: enhancedData.errCode || 0
 	};
+	if ( enhancedData.scales !== undefined ) legacyData.scales = enhancedData.scales;
 	if (enhancedData.rawData) {
 		const rawDataSource = enhancedData.rawData;
 		legacyData.rawData = { wp: rawDataSource.wp || rawDataSource.weatherProvider || "local" };
@@ -221,12 +227,18 @@ export function convertToLegacyFormat(enhancedData: any, adjustmentMethod: Adjus
 				legacyData.rawData.pwsBypassReason = rawDataSource.pwsBypassReason;
 			}
 		}
-		// Keep rawData within the firmware's findKeyVal buffer: TMP_BUFFER_SIZE is 320, so the rawData
-		// value must stay < 319 bytes or getweather_callback (weather.cpp) silently drops the whole
-		// field. Trim the verbose optional strings (least-essential first) until it fits; keep flags.
+		// Keep the final encoded value within findKeyVal's 319-byte limit. Custom legacy encoding can
+		// expand the JSON (notably "&" -> "AMPERSAND"), so measuring JSON characters here is unsafe.
 		for ( const trimKey of [ "skipReason", "pwsBypassReason", "reason" ] ) {
-			if ( JSON.stringify( legacyData.rawData ).length < 300 ) break;
+			if ( legacyWateringValueBytes( legacyData.rawData ) <= LEGACY_RAWDATA_LIMIT ) break;
 			if ( legacyData.rawData[ trimKey ] !== undefined ) delete legacyData.rawData[ trimKey ];
+		}
+		if ( legacyWateringValueBytes( legacyData.rawData ) > LEGACY_RAWDATA_LIMIT ) {
+			const provider = String( legacyData.rawData.wp ?? "unknown" );
+			const compact: any = { wp: legacyWateringValueBytes( provider ) <= 32 ? provider : "unknown" };
+			if ( legacyData.rawData.skip ) compact.skip = legacyData.rawData.skip;
+			if ( legacyData.rawData.pwsBypassed ) compact.pwsBypassed = legacyData.rawData.pwsBypassed;
+			legacyData.rawData = compact;
 		}
 	} else {
 		debugLog("DEBUG convertToLegacyFormat: enhancedData.rawData is missing.");
@@ -499,7 +511,7 @@ export const getWateringData = async function( req: express.Request, res: expres
 		return;
 	}
 
-	let adjustmentMethod: AdjustmentMethod	= ADJUSTMENT_METHOD[ adjustmentParam & ~( 1 << 7 ) ];
+	let adjustmentMethod: AdjustmentMethod = resolveLegacyAdjustmentMethod( adjustmentParam );
 	let checkRestrictions: boolean = ( ( adjustmentParam >> 7 ) & 1 ) > 0;
 	let adjustmentOptionsString: string = getParameter(req.query.wto);
 	let location: string = getParameter(req.query.loc);
@@ -597,17 +609,26 @@ function sendWateringData( res: express.Response, data: object, useJson: boolean
 		debugLog(`DEBUG sendWateringData: Sending JSON response: ${JSON.stringify(data)}`);
 		res.json( data );
 	} else {
-		let formatted = "";
-		for ( const key in data ) {
-			if ( !data.hasOwnProperty( key ) ) continue;
-			let value = (data as any)[ key ];
-			value = encodeLegacyWateringValue( value );
-			if ( typeof value === "undefined" ) continue;
-			formatted += `&${ key }=${ value }`;
-		}
+		const formatted = formatLegacyWateringData( data as Record<string, unknown> );
 		debugLog(`DEBUG sendWateringData: Sending QueryString response: "${formatted}"`);
 		res.send( formatted );
 	}
+}
+
+export const LEGACY_RAWDATA_LIMIT = 319; // Maximum value bytes accepted by Firmware findKeyVal.
+
+function legacyWateringValueBytes( value: unknown ): number {
+	return Buffer.byteLength( encodeLegacyWateringValue( value ) ?? "", "utf8" );
+}
+
+/** Format the exact legacy flat response consumed by firmware getweather_callback. */
+export function formatLegacyWateringData( data: Record<string, unknown> ): string {
+	let formatted = "";
+	for ( const [ key, item ] of Object.entries( data ) ) {
+		const value = encodeLegacyWateringValue( item );
+		if ( value !== undefined ) formatted += `&${ key }=${ value }`;
+	}
+	return formatted;
 }
 
 /**
@@ -616,7 +637,7 @@ function sendWateringData( res: express.Response, data: object, useJson: boolean
  * "&" -> "AMPERSAND". Do not use URLSearchParams or encodeURIComponent here;
  * standard URL encoding changes the on-the-wire bytes and breaks legacy parsers.
  */
-function encodeLegacyWateringValue( value: any ): string | undefined {
+function encodeLegacyWateringValue( value: unknown ): string | undefined {
 	switch ( typeof value ) {
 		case "undefined":
 			return undefined;

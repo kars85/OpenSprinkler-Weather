@@ -1,23 +1,39 @@
 # Firmware Integration Requirements — consuming the OpenSprinkler-Weather contract
 
-> **What this is:** a verified specification of exactly what the OpenSprinkler-Firmware must support to consume the OpenSprinkler-Weather service contract as it stands after this session (provider-fallback, per-plant Kc, water-budget Kc, /v1 API, MQTT+HA, rain-restriction consolidation). Produced via integration verification: Claude + Codex read the firmware's actual parser (`weather.cpp:54 getweather_callback`, `main.cpp` scheduler) and confirmed behavior against the service's emitted contract. Analysis/spec only — not implementation.
+> **What this is:** the producer-side specification for the legacy Weather→Firmware request and response contract, verified against the firmware parser (`weather.cpp:getweather_callback`) and guarded by `test/firmware-contract.spec.ts`.
 
 ## Actors & boundary
 - **Weather service** (this repo): emits the legacy `&key=value` watering response and, optionally, the `/v1` JSON API and MQTT topics.
-- **Firmware** (`C:\Dev\OpenSprinkler-Firmware`): polls `GET /<method>?loc=&wto=&fwv=` and parses the flat response in `getweather_callback`; the watering scale drives `IOPT_WATER_PERCENTAGE` (station runtime × wl/100).
+- **Firmware** (`OpenSprinkler-Firmware`): polls `GET /<method>?loc=&wto=&fwv=` and parses the flat response in `getweather_callback`; the watering scale drives `IOPT_WATER_PERCENTAGE` (station runtime × wl/100).
 - **MQTT/HA**: service → broker → Home Assistant. The firmware has its own independent `mqtt.cpp`; the service's MQTT does not target the firmware.
 
 ---
 
-## P0 — Backward-compatible consumption (verified: works **today, no firmware change required**, with two caveats)
+## P0 — Frozen legacy request and response contract
+
+**FR-P0.0 — Preserve request method IDs.** The numeric path segment is a public API:
+
+| ID | Weather method |
+|---:|---|
+| 0 | Manual |
+| 1 | Zimmerman |
+| 2 | RainDelay |
+| 3 | ETo |
+| 4 | WaterBudget |
+
+Bit 7 (`0x80`) is the restriction flag and is masked before lookup. Firmware's separate Monthly setting also has internal value 4, but firmware rewrites Monthly to request ID 0 before calling Weather. An incoming Weather request ID 4 therefore always means WaterBudget. The mapping and bit-7 behavior are pinned in `test/firmware-contract.spec.ts`.
 
 **FR-P0.1 — Tolerate new cross-cutting keys.** The firmware parser is key-pull, not schema validation: `getweather_callback` (`weather.cpp:54`) calls `findKeyVal` only for known keys (`errCode/scale/restricted/sunrise/sunset/eip/tz/rd/rawData/scales`). The service's new fields (`skip`, `skipReason`, `pwsBypassed`, `pwsBypassReason`) live **inside the `rawData` JSON blob**, not as top-level keys, and are stored opaquely in `wt_rawData`. **Verified:** unknown content does not break the parser. *Required capability: none new — the existing key-pull parser already satisfies this.*
 
 **FR-P0.2 — Honor `scale=0`.** Weather-skips and the (now-unified) bit-7 rain restriction produce `scale=0`. Firmware accepts `0` (range 0–250), writes `IOPT_WATER_PERCENTAGE=0` (`weather.cpp:72`), and scheduling multiplies by `wl/100` → no station queued (`main.cpp:886/915`). **Verified end-to-end: skip → scale 0 → no watering, no firmware change.**
 
-**⚠️ FR-P0.3 (REAL RISK — weather-service side) — `rawData` ≤ 319 bytes.** `findKeyVal` truncates/ignores a `rawData` value longer than `TMP_BUFFER_SIZE-1 = 319` bytes (`defines.h:31`). The new `skip`/`skipReason`/`pwsBypassed` fields **increase** the serialized `rawData` size. **Requirement (on the weather service, not firmware):** keep the legacy `rawData` payload compact — short `skipReason`/`pwsBypassReason` strings, and verify total serialized `rawData` stays < 319 bytes for every method, or the firmware silently drops the entire `rawData`. *This is the single most actionable integration finding; add a length guard/test on `convertToLegacyFormat` output.*
+**FR-P0.3 — Keep the final encoded `rawData` value at most 319 bytes.** With `TMP_BUFFER_SIZE = 320`, `findKeyVal` accepts values through 319 bytes and rejects longer values. `convertToLegacyFormat` measures the value *after* the custom legacy encoding, removes optional reason strings in a fixed order, then uses a compact `{wp,skip,pwsBypassed}` fallback if other fields are still oversized. This must be a UTF-8 byte measurement, not `JSON.stringify(...).length`: `&` expands to `AMPERSAND` on the wire. Combined skip/PWS metadata, non-trimmable oversize, and every adjustment method are covered by the contract guard.
 
-**⚠️ FR-P0.4 (GAP — restriction labeling) — emit top-level `restricted`.** The firmware has a real, wired restriction mechanism: `wt_restricted` (top-level `restricted` key) forces `wl=0` for weather programs, is exposed as `wtrestr` in `/jc`, and drives skipped-program **notifications** (`weather.cpp:82`, `main.cpp:887/941`). The service **never emits `restricted`**, so our restriction reaches the controller only as `scale=0` — watering still skips, **but the firmware/app cannot label or notify it as a restriction**. *Optional weather-service enhancement (lights up an existing firmware capability with zero firmware change): emit top-level `restricted=1` when the bit-7/rain restriction fires, in addition to `scale=0`.*
+**FR-P0.4 — Emit top-level `restricted=1`.** When the bit-7 restriction fires, Weather emits both `scale=0` and `restricted=1`. Firmware stores this as `wt_restricted`, exposes `wtrestr` in `/jc`, and uses it for skipped-program notifications (`weather.cpp:82`, `main.cpp:887/941`).
+
+**FR-P0.5 — Preserve the final flat encoding.** Legacy responses are `&key=value` fields. Values use the established custom substitutions: space → `+`, newline → the two characters `\\n`, and `&` → `AMPERSAND`. Do not replace this with `URLSearchParams` or `encodeURIComponent`; `formatLegacyWateringData` and its golden test own the exact wire representation.
+
+**FR-P0.6 — Reserve `scales`.** Firmware still parses the top-level `scales` array for 14-day interval adjustments. Normal Weather decisions do not currently produce it, but legacy conversion preserves it when supplied. Do not reuse or silently drop this key without a coordinated firmware decision.
 
 ---
 
@@ -41,26 +57,28 @@
 
 ## Edge cases (verified)
 - **Weather fetch fails / `errCode != 0`:** only `errCode==0` updates `checkwt_success_lasttime` and applies `scale`/`scales` (`weather.cpp:65`). After a success-timeout, Zimmerman/ETo reset `wl=100` and clear weather state (`main.cpp:1218`); manual/auto-rain-delay/monthly do not. **Edge:** if there was *never* a successful weather call, the timeout-reset path doesn't run — the controller uses its default `wl`. The service's **fail-open** behavior (no scale change when weather is unavailable) is compatible with this.
-- **`scales` array (14-day interval scales):** firmware supports `md_scales` (up to 14 days, used for interval programs when `mda==100`) and exposes `wls` in `/jc` (`weather.cpp:141`, `main.cpp:891`). The service does **not** emit `scales` → this firmware capability is **dormant**, not broken. (Monthly is separate: `wto.scales[12]` → `wt_monthly`.)
+- **`scales` array (14-day interval scales):** firmware supports `md_scales` (up to 14 days, used for interval programs when `mda==100`) and exposes `wls` in `/jc` (`weather.cpp:141`, `main.cpp:891`). Current decisions do not emit `scales`, so the capability is dormant; the legacy converter preserves the reserved field if supplied. Monthly remains separate (`wto.scales[12]` → `wt_monthly`).
 - **`rd` (rain delay):** firmware honors top-level `rd` (`weather.cpp:127`) — start/stop rain delay. The service emits `rd` from the adjustment response; unchanged.
 
 ---
 
 ## Requirements checklist
-- [x] P0 backward-compat **verified** against the real parser (no firmware change for skip/scale-0/new keys)
-- [x] P0 risk identified: `rawData` 320-byte truncation (weather-service-side length guard needed)
-- [x] P0 gap identified: emit top-level `restricted` to light up firmware restriction labeling/notifications
+- [x] Legacy request IDs 0–4 and bit-7 masking pinned
+- [x] Final custom flat-wire encoding pinned
+- [x] Final encoded `rawData` kept at or below 319 bytes
+- [x] RainDelay included in the cross-method response matrix
+- [x] Top-level `restricted` emitted for firmware labeling/notifications
+- [x] Reserved `scales` preserved when supplied
 - [x] P1 `/v1` adoption capabilities scoped (non-AVR HTTPS+JSON, status codes, buffer fit)
 - [x] P2 MQTT boundary confirmed (no firmware change)
 - [x] Failsafe/edge behavior characterized
 
 ## Out of scope
-Implementation; firmware refactors (see `firmware-definition.md`); changing the adjustment-method math; multi-zone `scales` revival; AVR HTTPS.
+Firmware refactors; changing adjustment-method math; reviving production `scales`; AVR HTTPS.
 
-## Recommended next actions (weather-service side, low-risk)
-1. **Add a `rawData` length guard + test** in `convertToLegacyFormat` (assert serialized `rawData` < 319 bytes; trim `skipReason`/`pwsBypassReason` if needed) — protects every legacy client (FR-P0.3).
-2. **Optionally emit top-level `restricted=1`** when the restriction fires, so the firmware labels/notifies it (FR-P0.4).
-3. Treat `/v1` firmware adoption as a **firmware-repo** project (non-AVR), using the seam from `firmware-definition.md`.
+## Maintenance
+1. Extend `test/firmware-contract.spec.ts` before changing a request ID, top-level key, encoder substitution, or rawData field.
+2. Treat `/v1` firmware adoption as a firmware-repository project (non-AVR); keep the legacy path for AVR and rollback compatibility.
 
 ---
-*Integration verification + spec — 🔴 Codex (firmware code-grounded, adversarial completeness) · 🔵 Claude (parser verification + synthesis). Firmware refs at `C:\Dev\OpenSprinkler-Firmware`.*
+*Verified against the kars85 firmware parser and maintained by the producer-side contract test.*
