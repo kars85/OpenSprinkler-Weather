@@ -16,6 +16,7 @@ import RainDelayAdjustmentMethod from "./adjustmentMethods/RainDelayAdjustmentMe
 import EToAdjustmentMethod, { calculateHargreavesSamaniETo } from "./adjustmentMethods/EToAdjustmentMethod";
 import WaterBudgetAdjustmentMethod from "./adjustmentMethods/WaterBudgetAdjustmentMethod";
 import { CodedError, ErrorCode, makeCodedError } from "../errors";
+import { getLocalStationIdentity } from "./weatherProviders/local";
 import { Geocoder } from "./geocoders/Geocoder";
 import { applyWeatherSkips } from "./skips/SkipGuard";
 import { buildFallbackChain, FallbackWeatherProvider, isPwsFallbackEnabled, parseFallbackKeys } from "./weatherProviders/FallbackWeatherProvider";
@@ -506,6 +507,14 @@ export const getWeatherData = async function( req: express.Request, res: express
 		}
 	}
 	weatherData.generatedAt = Math.floor( Date.now() / 1000 );
+
+	// In local/hybrid mode the local stream feeds watering adjustments; expose that sensor's
+	// self-reported identity regardless of which provider served this display forecast.
+	if ( process.env.WEATHER_PROVIDER === "local" ) {
+		const identity = getLocalStationIdentity();
+		if ( identity.id && weatherData.pwsId === undefined ) weatherData.pwsId = identity.id;
+		if ( identity.model && weatherData.pwsModel === undefined ) weatherData.pwsModel = identity.model;
+	}
 	
 	const response = { ...timeData, ...weatherData, location: coordinates };
 	debugLog(`DEBUG getWeatherData: Final response for /weather endpoint: ${JSON.stringify(response)}`);
