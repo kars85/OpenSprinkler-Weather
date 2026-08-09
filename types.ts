@@ -59,6 +59,10 @@ export interface WeatherData {
     observedAt?: number;
     /** The timestamp when the service assembled this response (in Unix epoch seconds). */
     generatedAt?: number;
+    /** The self-reported station ID of the local PWS feeding this data (sanitized). */
+    pwsId?: string;
+    /** The self-reported station hardware/firmware identity (e.g. "GW2000B_V3.3.2"; sanitized). */
+    pwsModel?: string;
 }
 
 /** The forecasted weather for a specific day in the future. */

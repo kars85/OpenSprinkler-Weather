@@ -132,10 +132,33 @@ function getMeasurement(req: express.Request, key: string): number {
 	return value;
 }
 
+/** Last station identity seen on the WU-protocol stream (untrusted; sanitized + length-capped). */
+let lastStationIdentity: { id?: string; model?: string } = {};
+
+function sanitizeIdentity( value: unknown ): string | undefined {
+	if ( typeof value !== "string" ) return undefined;
+	const clean = value.replace( /[^\w.\- ]/g, "" ).trim().slice( 0, 64 );
+	return clean || undefined;
+}
+
+export function getLocalStationIdentity(): { id?: string; model?: string } {
+	return { ...lastStationIdentity };
+}
+
 export const captureWUStream = async function( req: express.Request, res: express.Response ) {
 	if (!isLocalPwsAuthenticated(req)) {
 		res.status(401).send("unauthorized\n");
 		return;
+	}
+
+	// Hardware stations self-identify on each push (e.g. Ecowitt: ID=KXXX, softwaretype=GW2000B_V3.3.2).
+	const stationId = sanitizeIdentity( Array.isArray(req.query.ID) ? req.query.ID[0] : req.query.ID );
+	const stationModel = sanitizeIdentity( Array.isArray(req.query.softwaretype) ? req.query.softwaretype[0] : req.query.softwaretype );
+	if ( stationId || stationModel ) {
+		lastStationIdentity = {
+			...( stationId ? { id: stationId } : {} ),
+			...( stationModel ? { model: stationModel } : {} ),
+		};
 	}
 
 	let rainCount = getMeasurement(req, "dailyrainin");
@@ -209,7 +232,9 @@ export default class LocalWeatherProvider extends EnhancedWeatherProvider {
 			region: undefined,
 			city: undefined,
 			forecast: [],
-			...( Number.isFinite( latestObs.timestamp ) ? { observedAt: latestObs.timestamp } : {} )
+			...( Number.isFinite( latestObs.timestamp ) ? { observedAt: latestObs.timestamp } : {} ),
+			...( lastStationIdentity.id ? { pwsId: lastStationIdentity.id } : {} ),
+			...( lastStationIdentity.model ? { pwsModel: lastStationIdentity.model } : {} )
 		};
 		debugLog("DEBUG: LocalWeatherProvider.getWeatherData RETURNING result:", JSON.stringify(weather));
 		return normalizeWeatherData( "local", weather );
