@@ -106,4 +106,23 @@ describe( "/weatherData additive contract", () => {
 			delete process.env.WEATHER_PROVIDER;
 		}
 	} );
+	it( "carries the local station identity on display responses in hybrid mode", async () => {
+		process.env.WEATHER_PROVIDER = "local";
+		try {
+			const { captureWUStream } = await import( "./weatherProviders/local" );
+			const idReq = new MockExpressRequest( { method: "GET", url: "/weatherstation/updateweatherstation.php",
+				query: { ID: "KIAANKEN194", softwaretype: "GW2000B_V3.3.2", tempf: "72" } } );
+			await captureWUStream( idReq, new MockExpressResponse( { request: idReq } ) );
+			nock( "https://api.openweathermap.org" )
+				.get( "/data/3.0/onecall" ).query( true ).reply( 200, owmBody() );
+			const mocks = weatherMocks( COORDINATES, OWM_OPTIONS );
+			await getWeatherData( mocks.request, mocks.response );
+			const body: any = mocks.response._getJSON();
+			expect( body.weatherProvider ).to.equal( "OWM" );
+			expect( body.pwsId ).to.equal( "KIAANKEN194" );
+			expect( body.pwsModel ).to.equal( "GW2000B_V3.3.2" );
+		} finally {
+			delete process.env.WEATHER_PROVIDER;
+		}
+	} );
 } );
