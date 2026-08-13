@@ -14,7 +14,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: proxmox
 
     steps:
       - name: Checkout repository
@@ -36,7 +36,7 @@ jobs:
         run: npm test
 
   validate-source:
-    runs-on: ubuntu-latest
+    runs-on: proxmox
 
     steps:
       - name: Checkout release history
@@ -74,7 +74,7 @@ jobs:
           fi
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: proxmox
     needs: [ test, validate-source ]
     environment:
       name: weather-image-publish
