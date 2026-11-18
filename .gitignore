@@ -77,3 +77,8 @@ js/
 !/.agents/skills/opensprinkler-weather-intake
 !/.claude/skills/opensprinkler-weather-intake
 !/scripts/test_agent_workflow.py
+
+# Machine-local agent credentials and generated Python state
+.claude/settings.local.json
+.claude/agent-memory/
+__pycache__/
