@@ -8,13 +8,15 @@
     "opensprinkler-weather-intake"
   ],
   "verification_commands": [
+    "python3 -m unittest discover -s scripts -p 'test_agent_workflow.py'",
     "npm test",
     "npm run compile"
   ],
   "verification_note": "Preserve ETo, timezone and interval semantics and controller compatibility. Never use deployment commands as tests.",
   "ci_workflows": [
-    ".github/workflows/test.yml",
-    ".github/workflows/docker-publish.yml"
+    ".github/workflows/agent-workflow.yml",
+    ".github/workflows/docker-publish.yml",
+    ".github/workflows/test.yml"
   ],
   "setup_issue": "https://github.com/kars85/OpenSprinkler-Weather/issues/30"
 }
