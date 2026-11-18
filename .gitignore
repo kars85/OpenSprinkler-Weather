@@ -46,3 +46,34 @@ js/
 .empirica_reflex_logs/
 .claude-octopus/
 .breadcrumbs.yaml
+
+# Local agent runtime and credentials
+.empirica/
+.abc-state/
+.env
+.env.local
+.env.*.local
+
+# Discoverable project-owned workflow files
+!/.agent-workflow.json
+!/.claude/
+!/.claude/commands/
+!/.claude/commands/abc.md
+!/.claude/commands/intake.md
+!/.claude/skills/
+!/.agents/
+!/.agents/skills/
+!/skills/
+!/scripts/
+!/scripts/agent-workflow.py
+!/docs/
+!/docs/agent-workflow.md
+!/skills/opensprinkler-weather-abc/
+!/skills/opensprinkler-weather-abc/SKILL.md
+!/.agents/skills/opensprinkler-weather-abc
+!/.claude/skills/opensprinkler-weather-abc
+!/skills/opensprinkler-weather-intake/
+!/skills/opensprinkler-weather-intake/SKILL.md
+!/.agents/skills/opensprinkler-weather-intake
+!/.claude/skills/opensprinkler-weather-intake
+!/scripts/test_agent_workflow.py

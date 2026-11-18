@@ -1,0 +1,20 @@
+{
+  "name": "OpenSprinkler-Weather",
+  "repository": "kars85/OpenSprinkler-Weather",
+  "project_id": "0fb8d409-45f0-451b-badd-61ddfbaee3a2",
+  "description": "Irrigation weather calculations",
+  "skills": [
+    "opensprinkler-weather-abc",
+    "opensprinkler-weather-intake"
+  ],
+  "verification_commands": [
+    "npm test",
+    "npm run compile"
+  ],
+  "verification_note": "Preserve ETo, timezone and interval semantics and controller compatibility. Never use deployment commands as tests.",
+  "ci_workflows": [
+    ".github/workflows/test.yml",
+    ".github/workflows/docker-publish.yml"
+  ],
+  "setup_issue": "https://github.com/kars85/OpenSprinkler-Weather/issues/30"
+}

@@ -14,3 +14,11 @@ Wire-format changes land **here first** (this repo is canonical), keep them addi
 
 ## Verification discipline
 Verify firmware-side claims against the actual firmware source (`C:\Dev\OpenSprinkler-Firmware`) with `file:line` rather than assuming.
+
+<!-- project-workflow:start -->
+## Project work tracking and Empirica
+
+Use [the project workflow](docs/agent-workflow.md) for implementation, maintenance, bug intake and idea intake. GitHub Issues in `kars85/OpenSprinkler-Weather` are the work tracker; keep acceptance, handoff and verification evidence there. Preserve local specs/runbooks as reference documents. This supersedes older local-only task-tracker instructions.
+
+Run `python3 scripts/agent-workflow.py bootstrap` and `verify` when starting work; `session` opens this conversation's explicit Empirica session. The profile in `.agent-workflow.json` owns the project UUID, repository and checks. Use project-specific `opensprinkler-weather-abc` / `opensprinkler-weather-intake` skills or Claude `/abc` / `/intake`; keep findings scoped to this project. Existing safety and deployment constraints continue to apply.
+<!-- project-workflow:end -->
