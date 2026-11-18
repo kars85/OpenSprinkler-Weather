@@ -46,3 +46,53 @@ js/
 .empirica_reflex_logs/
 .claude-octopus/
 .breadcrumbs.yaml
+
+# Local agent runtime and credentials
+.empirica/
+.abc-state/
+.env
+.env.local
+.env.*.local
+
+# Discoverable project-owned workflow files
+!/.agent-workflow.json
+!/.claude/
+/.claude/*
+!/.claude/commands/
+/.claude/commands/*
+!/.claude/commands/abc.md
+!/.claude/commands/intake.md
+!/.claude/skills/
+/.claude/skills/*
+!/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/skills/
+!/scripts/
+!/scripts/agent-workflow.py
+!/docs/
+!/docs/agent-workflow.md
+!/skills/opensprinkler-weather-abc/
+!/skills/opensprinkler-weather-abc/SKILL.md
+!/.agents/skills/opensprinkler-weather-abc
+!/.claude/skills/opensprinkler-weather-abc
+!/skills/opensprinkler-weather-intake/
+!/skills/opensprinkler-weather-intake/SKILL.md
+!/.agents/skills/opensprinkler-weather-intake
+!/.claude/skills/opensprinkler-weather-intake
+!/scripts/test_agent_workflow.py
+
+# Machine-local agent credentials and generated Python state
+.claude/settings.local.json
+.claude/agent-memory/
+__pycache__/
+
+# Admit workflow verification without narrowing existing GitHub configuration rules
+!/.github/
+!/.github/workflows/
+!/.github/workflows/agent-workflow.yml
+
+# Isolated workflow parser/test environment
+/.workflow-test-env/
+!/scripts/requirements-agent-workflow.txt
